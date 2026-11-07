@@ -1,0 +1,24 @@
+# 示例假定 nginx 与 webman 位于同一主机；替换域名、根目录并在外层启用 HTTPS。
+# 放入 nginx 的 http 块内。
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+upstream taxilink_api { server 127.0.0.1:8787; }
+upstream taxilink_stream { server 127.0.0.1:8790; }
+upstream taxilink_mod { server 127.0.0.1:8788; }
+server {
+    listen 80;
+    server_name taxi.example.com;
+    root /srv/taxilink/passenger/dist;
+    client_max_body_size 128k;
+    location /api/ { proxy_pass http://taxilink_api; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
+    location = /ws { proxy_pass http://taxilink_stream; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_set_header Host $host; proxy_read_timeout 3600s; }
+    location = /taxilink { proxy_pass http://taxilink_mod; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_set_header X-TAXILink-Proof $http_x_taxilink_proof; proxy_read_timeout 120s; }
+    location / { try_files $uri $uri/ /index.html; }
+}
+server {
+    listen 80;
+    server_name taxi-admin.example.com;
+    root /srv/taxilink/admin/dist;
+    client_max_body_size 128k;
+    location /api/ { proxy_pass http://taxilink_api; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
+    location / { try_files $uri $uri/ /index.html; }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "htisinglewindow-taxilink",
+  "private": true,
+  "workspaces": [
+    "admin",
+    "passenger"
+  ],
+  "scripts": {
+    "dev:admin": "npm run dev -w admin",
+    "dev:passenger": "npm run dev -w passenger",
+    "build": "npm run build --workspaces",
+    "test": "php backend/tests/domain.php",
+    "test:api": "node --test tests/*.test.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@prettier/plugin-php": "^0.26.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.0"
+  }
+}

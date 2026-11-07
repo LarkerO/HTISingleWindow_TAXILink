@@ -1,0 +1,35 @@
+{
+  "name": "taxilink/platform",
+  "type": "project",
+  "license": "MIT",
+  "description": "TAXILink 账号、企业运营、调度与演示结算后端",
+  "require": {
+    "php": ">=8.2",
+    "ext-pdo": "*",
+    "ext-curl": "*",
+    "ext-mbstring": "*",
+    "workerman/webman-framework": "^2.1",
+    "monolog/monolog": "^2.0",
+    "predis/predis": "^3.7"
+  },
+  "autoload": {
+    "psr-4": {
+      "app\\": "./app",
+      "App\\": "./app",
+      "support\\": "./support"
+    }
+  },
+  "scripts": {
+    "post-package-install": [
+      "support\\Plugin::install"
+    ],
+    "post-package-update": [
+      "support\\Plugin::install"
+    ],
+    "pre-package-uninstall": [
+      "support\\Plugin::uninstall"
+    ]
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}

@@ -1,0 +1,43 @@
+name: 本地等价验证
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, pdo_mysql, curl, mbstring, pcntl
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: composer install --no-interaction --prefer-dist --working-dir=backend
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: |
+          cp backend/.env.example backend/.env
+          php backend/bin/console.php seed
+          cd backend
+          php start.php start -d
+      - run: |
+          npm run dev:passenger > /tmp/passenger.log 2>&1 &
+          npm run dev:admin > /tmp/admin.log 2>&1 &
+          node -e "Promise.all([8787,5173,5174].map(async p=>{for(let i=0;i<40;i++){try{const r=await fetch('http://localhost:'+p+(p===8787?'/api/health':''));if(r.ok)return}catch{}await new Promise(r=>setTimeout(r,500));}throw Error('服务未启动 '+p)})).catch(e=>{console.error(e);process.exit(1)})"
+      - run: npm run test:api
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-diagnostics
+          path: |
+            test-results
+            artifacts
+            backend/runtime/logs

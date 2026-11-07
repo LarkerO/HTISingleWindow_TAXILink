@@ -1,0 +1,14 @@
+# 外部源码仅用于接口核对，不纳入本项目版本管理。
+.reference/
+node_modules/
+dist/
+vendor/
+runtime/
+.env
+.env.*
+!.env.example
+*.pem
+*.sqlite*
+playwright-report/
+test-results/
+artifacts/
