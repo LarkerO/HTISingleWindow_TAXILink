@@ -52,8 +52,10 @@ Linux 从 `backend` 运行 `php start.php start`。首次运行请访问上述 *
 
 ## 检查
 
+检查仅在本地执行，仓库不配置远端 CI。
+
 ```powershell
-npm test                 # 独立内存数据库领域测试
+npm test                 # 领域测试与首次数据库初始化检查
 npm run build           # 两端类型检查与生产构建
 npm run test:api        # 需先启动演示后端
 npx playwright install chromium

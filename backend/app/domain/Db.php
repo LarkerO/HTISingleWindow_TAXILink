@@ -21,6 +21,12 @@ final class Db
         ) {
             $dsn = 'sqlite:' . dirname(__DIR__, 2) . '/' . substr($dsn, 7);
         }
+        if (str_starts_with($dsn, 'sqlite:') && $dsn !== 'sqlite::memory:') {
+            $directory = dirname(substr($dsn, 7));
+            if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
+                throw new \RuntimeException('无法创建 SQLite 数据目录：' . $directory);
+            }
+        }
         self::$pdo = new PDO($dsn, Env::get('DB_USER'), Env::get('DB_PASSWORD'), [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

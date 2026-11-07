@@ -5,3 +5,4 @@
 本仓库包含 backend（webman）、admin（React + Vite + Ant Design + ProComponents）、passenger（Vue 3 + Vite + TDesign Mobile）。
 优先在业务后端解决调度、权限、支付问题，仅在现有协议确实缺失能力时修改 TAXILink_MOD。
 支付当前仅演示，禁止接入真实扣款或将演示支付描述为真实支付。
+验证以本地测试、类型检查和构建为准。不要添加或启用 GitHub Actions 等远端 CI，除非用户明确要求。

@@ -9,7 +9,7 @@
     "dev:admin": "npm run dev -w admin",
     "dev:passenger": "npm run dev -w passenger",
     "build": "npm run build --workspaces",
-    "test": "php backend/tests/domain.php",
+    "test": "php backend/tests/domain.php && php backend/tests/bootstrap.php",
     "test:api": "node --test tests/*.test.mjs",
     "test:e2e": "playwright test"
   },
