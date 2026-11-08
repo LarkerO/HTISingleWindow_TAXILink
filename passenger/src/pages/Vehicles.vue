@@ -62,6 +62,7 @@ async function quote() {
     quoteId.value = d.id;
     expires.value = d.expires;
     offers.value = d.offers;
+    model.value = '';
     unavailable.value = d.unavailable;
     selected.value = [...new Set(d.offers.map((o) => o.companyId))];
   } catch (e) {

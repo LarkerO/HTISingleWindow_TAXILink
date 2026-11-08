@@ -67,7 +67,7 @@ final class Admin
                     Db::one('SELECT username FROM users WHERE id=?', [$row['user_id']])[
                         'username'
                     ] ?? '';
-            };
+            }
         }
         return $rows;
     }
@@ -180,10 +180,12 @@ final class Admin
                 throw new AppError('INVALID_VEHICLE', '请配置 1–16 节真实车型');
             }
             $capacity = 0;
+            $cleanCars = [];
             foreach ($cars as $car) {
                 if (
                     !is_string($car['vehicleId'] ?? null) ||
-                    !$car['vehicleId'] ||
+                    trim($car['vehicleId']) === '' ||
+                    mb_strlen($car['vehicleId']) > 256 ||
                     !is_int($car['capacity'] ?? null) ||
                     $car['capacity'] < 1 ||
                     $car['capacity'] > 1000
@@ -191,6 +193,10 @@ final class Admin
                     throw new AppError('INVALID_VEHICLE', '车型资源及容量无效');
                 }
                 $length = $car['length'] ?? 0;
+                if (!is_numeric($length)) {
+                    throw new AppError('INVALID_VEHICLE', '车身长度无效');
+                }
+                $cleanCar = ['vehicleId' => $car['vehicleId'], 'capacity' => $car['capacity']];
                 foreach (
                     [
                         'length' => [0.5, 100],
@@ -205,9 +211,12 @@ final class Admin
                     if (!is_numeric($car[$key] ?? null) || $car[$key] < $min || $car[$key] > $max) {
                         throw new AppError('INVALID_VEHICLE', '车身参数无效：' . $key);
                     }
+                    $cleanCar[$key] = (float) $car[$key];
                 }
+                $cleanCars[] = $cleanCar;
                 $capacity += $car['capacity'];
             }
+            $cleanConfig = ['vehicleCars' => $cleanCars];
             foreach (
                 [
                     'maxSpeedKmh' => [1, 160],
@@ -223,9 +232,10 @@ final class Admin
                 ) {
                     throw new AppError('INVALID_VEHICLE', '行驶参数无效：' . $key);
                 }
+                $cleanConfig[$key] = (float) $config[$key];
             }
             $row['capacity'] = $capacity;
-            $row['config'] = Db::json($config);
+            $row['config'] = Db::json($cleanConfig);
         }
         return Db::tx(function () use ($u, $resource, $in, $old, $id, $row) {
             if ($old) {

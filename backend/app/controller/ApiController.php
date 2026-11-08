@@ -50,17 +50,19 @@ final class ApiController
                 throw new AppError('OAUTH_NOT_CONFIGURED', 'Portal 登录尚未配置', 503);
             }
             $state = Db::id();
+            $destination = $r->get('destination') === 'admin' ? 'admin' : 'passenger';
             $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
             Db::insert('oauth_states', [
                 'id' => hash('sha256', $state),
                 'verifier' => $verifier,
-                'destination' => $r->get('destination') === 'admin' ? 'admin' : 'passenger',
+                'destination' => $destination,
+                'return_to' => Auth::returnPath((string) $r->get('returnTo', '/')),
                 'expires' => time() + 600,
             ]);
             $query = http_build_query([
                 'response_type' => 'code',
                 'client_id' => Env::get('PORTAL_CLIENT_ID'),
-                'redirect_uri' => Env::get('PORTAL_REDIRECT_URI'),
+                'redirect_uri' => Auth::oauthRedirect($destination),
                 'scope' => 'profile hydroline',
                 'state' => $state,
                 'code_challenge' => rtrim(
@@ -94,7 +96,7 @@ final class ApiController
                 [
                     'grant_type' => 'authorization_code',
                     'code' => (string) $r->get('code', ''),
-                    'redirect_uri' => Env::get('PORTAL_REDIRECT_URI'),
+                    'redirect_uri' => Auth::oauthRedirect($entry['destination']),
                     'code_verifier' => $entry['verifier'],
                 ],
                 [
@@ -109,7 +111,10 @@ final class ApiController
             ]);
             $session = Auth::login($profile);
             return redirect(
-                Env::get($entry['destination'] === 'admin' ? 'ADMIN_ORIGIN' : 'APP_ORIGIN'),
+                rtrim(
+                    Env::get($entry['destination'] === 'admin' ? 'ADMIN_ORIGIN' : 'APP_ORIGIN'),
+                    '/',
+                ) . Auth::returnPath($entry['return_to'] ?? '/'),
             )->withHeader('Set-Cookie', [
                 Auth::cookie('tl_session', $session, 7200),
                 Auth::cookie('tl_oauth', '', 0),
@@ -224,7 +229,7 @@ final class ApiController
                         Dispatch::finish($o, 'CANCELLED', 'passenger.cancelled', 0);
                     } elseif (!in_array($o['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
                         Db::run(
-                            "UPDATE orders SET state='CANCEL_REQUESTED',updated_at=? WHERE id=?",
+                            "UPDATE orders SET revision=revision+1,state='CANCEL_REQUESTED',updated_at=? WHERE id=?",
                             [time(), $id],
                         );
                         Booking::event($id, 'passenger.cancel_requested');
@@ -297,10 +302,28 @@ final class ApiController
                     throw new AppError('INVALID_ACTION', '调度操作无效');
                 }
                 if ($action === 'cancel') {
-                    Db::run(
-                        "UPDATE orders SET state='CANCEL_REQUESTED' WHERE id=? AND state NOT IN ('CANCELLED','COMPLETED','FAILED')",
-                        [$o['id']],
-                    );
+                    Db::tx(function () use ($o): void {
+                        $current = Db::one('SELECT * FROM orders WHERE id=?' . Db::lock(), [
+                            $o['id'],
+                        ]);
+                        if (
+                            in_array($current['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)
+                        ) {
+                            return;
+                        }
+                        if ((Db::data($current['telemetry'])['phase'] ?? '') === 'RECOVERED') {
+                            Dispatch::finish($current, 'FAILED', 'admin.closed_recovered', 0);
+                        } elseif (
+                            in_array($current['state'], ['AWAITING_PAYMENT', 'QUEUED'], true)
+                        ) {
+                            Dispatch::finish($current, 'CANCELLED', 'admin.cancelled', 0);
+                        } else {
+                            Db::run(
+                                "UPDATE orders SET revision=revision+1,state='CANCEL_REQUESTED',updated_at=? WHERE id=?",
+                                [time(), $o['id']],
+                            );
+                        }
+                    });
                 } else {
                     Bridge::command('taxi.control', ['orderId' => $o['id'], 'mode' => $action]);
                 }

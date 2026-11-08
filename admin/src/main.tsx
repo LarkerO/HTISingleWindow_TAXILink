@@ -323,7 +323,8 @@ function AdminApp() {
   async function control(action: string) {
     modal.confirm({
       title: '确认执行调度操作？',
-      content: '操作将记录审计日志。有人乘坐时取消需要先下车。',
+      content:
+        '操作将记录审计日志。有人乘坐时取消需要先下车；模组重启后已回收的订单将按失败关闭，费用归零并生成演示退款。',
       onOk: async () => {
         try {
           await api('/admin/orders/' + drawerOrder?.id + '/control', { action });

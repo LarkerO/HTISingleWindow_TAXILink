@@ -152,6 +152,49 @@ final class Db
         foreach ($definitions as $table => $definition) {
             self::pdo()->exec("CREATE TABLE IF NOT EXISTS $table ($definition)");
         }
+        // Multi-company quotes contain sampled rail geometry and can exceed MySQL TEXT's 64 KiB.
+        if (!self::sqlite()) {
+            foreach (
+                [
+                    'quotes' => ['offers'],
+                    'orders' => ['snapshot', 'telemetry'],
+                    'candidates' => ['offer', 'params'],
+                    'events' => ['data'],
+                    'mod_inbox' => ['data'],
+                ]
+                as $table => $fields
+            ) {
+                foreach (
+                    self::all(
+                        'SELECT COLUMN_NAME,DATA_TYPE FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?',
+                        [$table],
+                    )
+                    as $column
+                ) {
+                    if (
+                        in_array($column['COLUMN_NAME'], $fields, true) &&
+                        $column['DATA_TYPE'] === 'text'
+                    ) {
+                        self::pdo()->exec(
+                            "ALTER TABLE $table MODIFY " .
+                                $column['COLUMN_NAME'] .
+                                ' MEDIUMTEXT NOT NULL',
+                        );
+                    }
+                }
+            }
+        }
+        $oauthColumns = self::sqlite()
+            ? array_column(self::all('PRAGMA table_info(oauth_states)'), 'name')
+            : array_column(
+                self::all(
+                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='oauth_states'",
+                ),
+                'COLUMN_NAME',
+            );
+        if (!in_array('return_to', $oauthColumns, true)) {
+            self::pdo()->exec('ALTER TABLE oauth_states ADD COLUMN return_to TEXT');
+        }
         $columns = self::sqlite()
             ? array_column(self::all('PRAGMA table_info(orders)'), 'name')
             : array_column(
@@ -164,6 +207,9 @@ final class Db
             self::pdo()->exec(
                 'ALTER TABLE orders ADD COLUMN queue_ticket BIGINT NOT NULL DEFAULT 0',
             );
+        }
+        if (!in_array('revision', $columns, true)) {
+            self::pdo()->exec('ALTER TABLE orders ADD COLUMN revision BIGINT NOT NULL DEFAULT 0');
         }
         if (!self::one('SELECT id FROM dispatch_sequence WHERE id=1')) {
             self::insert('dispatch_sequence', ['id' => 1, 'ticket' => 0]);

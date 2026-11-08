@@ -111,13 +111,13 @@ final class Booking
                                         throw $e;
                                     }
                                 }
-                            };
+                            }
                         }
                         if ($best) {
                             $offers[] = $best;
                             $found = true;
                         }
-                    };
+                    }
                 }
             }
             if (!$found) {
@@ -219,6 +219,17 @@ final class Booking
             $now = time();
             $id = Db::id();
             Db::run('UPDATE dispatch_sequence SET ticket=ticket+1 WHERE id=1');
+            // Serialize concurrent retries before inserting the unique user/key pair.
+            $existing = Db::one(
+                'SELECT * FROM orders WHERE user_id=? AND idempotency_key=?' . Db::lock(),
+                [$user['id'], $key],
+            );
+            if ($existing) {
+                if ($existing['request_hash'] !== $fingerprint) {
+                    throw new AppError('ORDER_CONFLICT', '请求标识已用于其他参数', 409);
+                }
+                return self::view($existing);
+            }
             $ticket = (int) Db::one('SELECT ticket FROM dispatch_sequence WHERE id=1')['ticket'];
             $snapshot = [
                 'pickup' => Db::one('SELECT name FROM points WHERE id=?', [$q['pickup_id']])[
@@ -275,6 +286,7 @@ final class Booking
         $t = Db::data($o['telemetry']);
         return [
             'id' => $o['id'],
+            'revision' => (int) ($o['revision'] ?? 0),
             'state' => $o['state'],
             'pickup' => $snapshot['pickup'],
             'dropoff' => $snapshot['dropoff'],
@@ -334,11 +346,17 @@ final class Booking
                     'demonstration' => 1,
                 ]);
             }
-            Db::run('UPDATE orders SET paid=amount,state=?,updated_at=? WHERE id=?', [
-                $o['state'] === 'AWAITING_PAYMENT' ? 'QUEUED' : $o['state'],
-                time(),
-                $id,
-            ]);
+            Db::run(
+                'UPDATE orders SET revision=revision+1,paid=amount,state=?,updated_at=?,queue_until=? WHERE id=?',
+                [
+                    $o['state'] === 'AWAITING_PAYMENT' ? 'QUEUED' : $o['state'],
+                    time(),
+                    $o['state'] === 'AWAITING_PAYMENT'
+                        ? time() + (int) Env::get('QUEUE_TIMEOUT_SECONDS', '300')
+                        : $o['queue_until'],
+                    $id,
+                ],
+            );
             self::event($id, 'payment.demonstrated', ['amountMinor' => $difference]);
             return self::view(Db::one('SELECT * FROM orders WHERE id=?', [$id]));
         });

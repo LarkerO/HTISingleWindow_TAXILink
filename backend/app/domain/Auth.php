@@ -5,6 +5,23 @@ use support\Request;
 
 final class Auth
 {
+    public static function oauthRedirect(string $destination): string
+    {
+        return $destination === 'admin'
+            ? (Env::get('PORTAL_ADMIN_REDIRECT_URI') ?:
+                rtrim(Env::get('ADMIN_ORIGIN'), '/') . '/api/auth/callback')
+            : Env::get('PORTAL_REDIRECT_URI');
+    }
+    public static function returnPath(string $path): string
+    {
+        // Only local application routes are accepted, never arbitrary redirect URLs.
+        return preg_match(
+            '#^/(?:orders|profile|vehicles|trip/[a-z0-9-]+|checkout/[a-z0-9-]+)?(?:\?[^\r\n\\\\]*)?$#D',
+            $path,
+        ) && strlen($path) <= 2048
+            ? $path
+            : '/';
+    }
     public static function session(Request $request, bool $required = true): ?array
     {
         $token = (string) $request->cookie('tl_session', '');

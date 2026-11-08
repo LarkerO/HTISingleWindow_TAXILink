@@ -4,7 +4,7 @@ putenv('DB_DSN=sqlite::memory:');
 putenv('DEMO_MODE=1');
 putenv('APP_ENV=test');
 require dirname(__DIR__) . '/vendor/autoload.php';
-use app\domain\{Admin, AppError, Auth, Booking, Db, Demo, Dispatch, Fare};
+use app\domain\{Admin, AppError, Auth, Booking, Db, Demo, Dispatch, Env, Fare};
 $checks = 0;
 function check(bool $value, string $message): void
 {
@@ -227,5 +227,124 @@ check(
         ),
     ) === 0,
     '点组可以批量移除当前子点',
+);
+// Cross-component regression cases use isolated in-memory order records.
+foreach (['demo_rides', 'payments', 'events', 'candidates', 'orders', 'quotes'] as $table) {
+    Db::run("DELETE FROM $table");
+}
+$q = Booking::quote($u, ['pickupId' => 'riverside', 'dropoffId' => 'museum', 'passengers' => 1]);
+$p = Booking::create($u, ['quoteId' => $q['id'], 'companyIds' => ['jade']], 'delayed-prepayment');
+Db::run('UPDATE orders SET queue_until=? WHERE id=?', [time() - 60, $p['id']]);
+$paid = Booking::pay($u, $p['id']);
+check($paid['queueUntil'] > time() + 200, '付款后重新开始完整候补窗口');
+Dispatch::tick();
+$future = (time() + 10) * 1000;
+Dispatch::ingest($p['id'], 'taxi.telemetry', ['phase' => 'ACTIVE', 'stage' => 'ON_TRIP'], $future);
+$before = Booking::view(Db::one('SELECT * FROM orders WHERE id=?', [$p['id']]));
+Dispatch::ingest(
+    $p['id'],
+    'ride.waiting_pickup',
+    ['stage' => 'WAITING_PICKUP'],
+    $future - 5000,
+    'review-old-log',
+);
+Dispatch::ingest(
+    $p['id'],
+    'taxi.telemetry',
+    ['phase' => 'ACTIVE', 'stage' => 'TO_PICKUP'],
+    $future - 1000,
+);
+$after = Booking::view(Db::one('SELECT * FROM orders WHERE id=?', [$p['id']]));
+check($after['telemetry']['stage'] === 'ON_TRIP', '历史日志和迟到遥测不会覆盖最新行程阶段');
+check($after['revision'] > $before['revision'], '订单提供单调版本号用于 HTTP 与 WebSocket 去旧');
+Dispatch::ingest($p['id'], 'ride.completed', ['phase' => 'COMPLETED'], $future + 1000);
+Dispatch::ingest($p['id'], 'passenger.boarded', [], $future - 10000, 'review-board');
+check(
+    Db::one('SELECT state FROM orders WHERE id=?', [$p['id']])['state'] === 'FINALIZING',
+    '日志回放不会把待结算订单变回活动状态',
+);
+
+// Disable a scope after quoting: the old quote must not authorize a new dispatch.
+$q = Booking::quote($u, ['pickupId' => 'riverside', 'dropoffId' => 'museum', 'passengers' => 1]);
+$revoked = Booking::create(
+    $u,
+    ['quoteId' => $q['id'], 'companyIds' => ['river']],
+    'revoked-scope-order',
+);
+Admin::scope($u, 'river', ['action' => 'remove', 'pointIds' => ['museum']]);
+Dispatch::tick();
+Dispatch::tick();
+check(
+    Db::one('SELECT state FROM orders WHERE id=?', [$revoked['id']])['state'] === 'FAILED',
+    '撤销运营范围后旧报价不会继续派车',
+);
+check(
+    !Db::one('SELECT id FROM demo_rides WHERE id=?', [$revoked['id']]),
+    '范围撤销没有产生游戏车辆',
+);
+
+$vehicle = Db::one('SELECT * FROM vehicles WHERE company_id=?', ['jade']);
+$config = Db::data($vehicle['config']);
+$config['maxSpeedKmh'] = '30';
+$config['vehicleCars'][0]['length'] = '4';
+$config['centerId'] = 'unauthorized-center';
+$config['pickupPlatformId'] = '999';
+$saved = Admin::save($u, 'vehicles', [
+    'companyId' => 'jade',
+    'name' => '协议规范化测试',
+    'config' => $config,
+]);
+$clean = Db::data($saved['config']);
+check(
+    is_numeric($clean['maxSpeedKmh']) &&
+        !is_string($clean['maxSpeedKmh']) &&
+        !is_string($clean['vehicleCars'][0]['length']),
+    '管理端数值字符串转换为模组要求的 JSON 数字',
+);
+check(
+    !isset($clean['centerId']) && !isset($clean['pickupPlatformId']),
+    '车型配置不能夹带路线或中心覆盖参数',
+);
+putenv('ADMIN_ORIGIN=https://taxi-admin.example.com');
+putenv('PORTAL_ADMIN_REDIRECT_URI');
+check(
+    Auth::oauthRedirect('admin') === 'https://taxi-admin.example.com/api/auth/callback',
+    '管理端 OAuth 回到管理端域名设置 Cookie',
+);
+check(
+    Auth::returnPath('/profile?invite=abc') === '/profile?invite=abc',
+    'OAuth 保留邀请页面上下文',
+);
+check(
+    Auth::returnPath('//evil.example') === '/' && Auth::returnPath('/\\evil.example') === '/',
+    'OAuth 返回路径拒绝外域重定向',
+);
+putenv('TAXILINK_PATH_TEST=C:\\keys\\mod.pem');
+check(
+    Env::keyPath('TAXILINK_PATH_TEST', '') === 'C:\\keys\\mod.pem',
+    'Windows 绝对密钥路径不重复拼接项目目录',
+);
+putenv('TAXILINK_PATH_TEST=/srv/keys/mod.pem');
+check(Env::keyPath('TAXILINK_PATH_TEST', '') === '/srv/keys/mod.pem', 'Linux 绝对密钥路径保持原样');
+
+$loginToken = Auth::login(['sub' => 'demo', 'preferred_username' => '测试管理员']);
+$session = Db::one('SELECT * FROM sessions WHERE id=?', [hash('sha256', $loginToken)]);
+Db::run("UPDATE orders SET state='NEEDS_ATTENTION',telemetry=?,paid=500,amount=500 WHERE id=?", [
+    Db::json(['phase' => 'RECOVERED']),
+    $p['id'],
+]);
+$body = '{"action":"cancel"}';
+$request = new \support\Request(
+    "POST /api/admin/orders/{$p['id']}/control HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nCookie: tl_session=$loginToken\r\nX-CSRF-Token: {$session['csrf']}\r\nContent-Length: " .
+        strlen($body) .
+        "\r\n\r\n" .
+        $body,
+);
+$response = new \app\controller\ApiController()->handle($request);
+check($response->getStatusCode() === 200, '管理员可主动关闭模组重启回收订单');
+$closed = Db::one('SELECT * FROM orders WHERE id=?', [$p['id']]);
+check(
+    $closed['state'] === 'FAILED' && (int) $closed['paid'] === 0 && (int) $closed['amount'] === 0,
+    '重启回收订单关闭后停止重试并生成演示退款',
 );
 echo "\n$checks 项领域验证通过\n";

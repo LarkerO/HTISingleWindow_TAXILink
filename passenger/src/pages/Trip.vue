@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, requireLogin, report, money, stateLabel, type Order } from '../api';
 import RouteMap from '../components/RouteMap.vue';
@@ -10,6 +10,17 @@ const route = useRoute(),
   confirmCancel = ref(false),
   connected = ref(false);
 let timer: ReturnType<typeof setInterval> | undefined, ws: WebSocket | undefined;
+let reconnect: ReturnType<typeof setTimeout> | undefined,
+  stopped = false,
+  started = false;
+function accept(next: Order) {
+  if (
+    !stopped &&
+    next.id === route.params.id &&
+    (!order.value || next.revision >= order.value.revision)
+  )
+    order.value = next;
+}
 const terminal = computed(
   () => order.value && ['COMPLETED', 'CANCELLED', 'FAILED'].includes(order.value.state),
 );
@@ -20,12 +31,14 @@ const title = computed(() => {
 });
 async function load() {
   try {
-    order.value = await api<Order>('/orders/' + route.params.id);
+    accept(await api<Order>('/orders/' + route.params.id));
   } catch (e) {
     report(e);
   }
 }
 function start() {
+  if (stopped || started) return;
+  started = true;
   load();
   timer = setInterval(load, 4000);
   connect();
@@ -38,16 +51,28 @@ function connect() {
       const d = JSON.parse(e.data);
       if (d.type === 'orders.snapshot') {
         const o = d.orders.find((v: Order) => v.id === route.params.id);
-        if (o) order.value = o;
+        if (o) accept(o);
       }
     } catch {
       /* HTTP polling remains available. */
     }
   };
-  ws.onclose = () => (connected.value = false);
+  ws.onclose = () => {
+    connected.value = false;
+    if (!stopped) reconnect = setTimeout(connect, 5000);
+  };
 }
+watch(
+  () => route.params.id,
+  () => {
+    order.value = null;
+    if (started) load();
+  },
+);
 onMounted(() => requireLogin(start));
 onUnmounted(() => {
+  stopped = true;
+  if (reconnect) clearTimeout(reconnect);
   if (timer) clearInterval(timer);
   ws?.close();
 });

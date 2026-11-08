@@ -35,4 +35,13 @@ final class Env
     {
         return self::get('DEMO_MODE', '0') === '1';
     }
+    public static function keyPath(string $key, string $default): string
+    {
+        $path = self::get($key, $default);
+        return str_starts_with($path, '/') ||
+            str_starts_with($path, '\\') ||
+            preg_match('/^[A-Za-z]:[\\\\\/]/', $path)
+            ? $path
+            : dirname(__DIR__, 2) . '/' . $path;
+    }
 }

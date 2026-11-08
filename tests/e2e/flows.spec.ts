@@ -1,4 +1,53 @@
 import { test, expect } from '@playwright/test';
+test('行程页忽略晚到的旧 HTTP 快照', async ({ page }) => {
+  const order = {
+    id: 'ordering-test',
+    revision: 1,
+    state: 'ACTIVE',
+    pickup: '上车点',
+    dropoff: '下车点',
+    passengers: 1,
+    companyId: null,
+    amountMinor: 100,
+    paidMinor: 0,
+    createdAt: 1,
+    billingStarted: 1,
+    offers: [],
+    queueUntil: 0,
+    telemetry: { stage: 'WAITING_PICKUP', stageLabel: '等待上客' },
+  };
+  await page.route('**/api/me', (route) =>
+    route.fulfill({
+      json: {
+        user: { id: 'test', username: '测试用户', csrf: 'test', memberships: [] },
+        demo: true,
+      },
+    }),
+  );
+  let deliver!: () => void;
+  const release = new Promise<void>((resolve) => {
+    deliver = resolve;
+  });
+  await page.route('**/api/orders/ordering-test', async (route) => {
+    await release;
+    await route.fulfill({ json: order });
+  });
+  await page.routeWebSocket('**/ws', (ws) => {
+    ws.send(
+      JSON.stringify({
+        type: 'orders.snapshot',
+        orders: [{ ...order, revision: 2, telemetry: { stage: 'ON_TRIP', stageLabel: '行程中' } }],
+      }),
+    );
+  });
+  await page.goto('/trip/ordering-test');
+  await expect(page.getByText('行程中', { exact: true })).toBeVisible();
+  const response = page.waitForResponse('**/api/orders/ordering-test');
+  deliver();
+  await response;
+  await expect(page.getByText('行程中', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '我已上车，确认发车' })).toBeHidden();
+});
 test('游客主动登录提示、地址选择、报价与下单', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const errors: string[] = [];

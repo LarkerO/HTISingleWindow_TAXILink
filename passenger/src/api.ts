@@ -41,6 +41,7 @@ export interface Geometry {
 }
 export interface Order {
   id: string;
+  revision: number;
   state: string;
   pickup: string;
   dropoff: string;

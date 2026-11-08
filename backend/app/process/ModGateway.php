@@ -17,13 +17,19 @@ final class ModGateway
     {
         $this->wire = new Sm2Wire(
             Env::get('TAXILINK_OPENSSL', 'openssl'),
-            base_path(Env::get('TAXILINK_GATEWAY_PRIVATE_KEY', 'keys/gateway-private.pem')),
-            base_path(Env::get('TAXILINK_MOD_PUBLIC_KEY', 'keys/mod-public.pem')),
+            Env::keyPath('TAXILINK_GATEWAY_PRIVATE_KEY', 'keys/gateway-private.pem'),
+            Env::keyPath('TAXILINK_MOD_PUBLIC_KEY', 'keys/mod-public.pem'),
         );
         if (strlen(Env::get('GATEWAY_TOKEN')) < 32) {
             throw new \RuntimeException('请配置至少 32 字符的 GATEWAY_TOKEN');
         }
-        $http = new Worker('http://127.0.0.1:8789');
+        $port = filter_var(Env::get('GATEWAY_RPC_PORT', '8789'), FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => 65535],
+        ]);
+        if ($port === false) {
+            throw new \RuntimeException('GATEWAY_RPC_PORT 必须是有效端口');
+        }
+        $http = new Worker('http://127.0.0.1:' . $port);
         $http->onMessage = function (TcpConnection $c, Request $r): void {
             if (
                 !hash_equals(

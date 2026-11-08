@@ -13,7 +13,8 @@ import {
 } from './api';
 const router = useRouter(),
   route = useRoute();
-const goLogin = () => window.location.assign('/api/auth/start');
+const goLogin = () =>
+  window.location.assign('/api/auth/start?returnTo=' + encodeURIComponent(route.fullPath));
 onMounted(() => refreshUser().catch(report));
 const nav = (path: string) =>
   path === '/' ? router.push(path) : requireLogin(() => router.push(path));

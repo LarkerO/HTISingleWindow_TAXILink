@@ -40,7 +40,11 @@ final class Dispatch
                             self::ingest(
                                 $o['id'],
                                 $log['type'],
-                                isset($log['stage']) ? ['stage' => $log['stage']] : [],
+                                [
+                                    'stage' => $log['stage'] ?? '',
+                                    'detail' => $log['detail'] ?? [],
+                                    'occurredAt' => (int) $log['timestamp'],
+                                ],
                                 (int) $log['timestamp'],
                                 (string) $log['sequence'],
                             );
@@ -54,6 +58,13 @@ final class Dispatch
                     } catch (AppError $e) {
                         if ($e->key !== 'VEHICLE_NOT_READY') {
                             throw $e;
+                        }
+                        if (($status['phase'] ?? '') === 'COMPLETED') {
+                            throw new AppError(
+                                'FINAL_GEOMETRY_PENDING',
+                                '等待最终行程轨迹核对',
+                                503,
+                            );
                         }
                     }
                     self::ingest($o['id'], 'reconcile.final', $status, time() * 1000);
@@ -70,7 +81,7 @@ final class Dispatch
                     } catch (AppError $e) {
                         if (in_array($e->key, ['VEHICLE_OCCUPIED', 'VEHICLE_MOVING'], true)) {
                             Db::run(
-                                "UPDATE orders SET state='NEEDS_ATTENTION',updated_at=? WHERE id=?",
+                                "UPDATE orders SET revision=revision+1,state='NEEDS_ATTENTION',updated_at=? WHERE id=?",
                                 [time(), $o['id']],
                             );
                             Booking::event($o['id'], 'cancel.requires_assistance', [
@@ -104,7 +115,7 @@ final class Dispatch
                                 )
                             ) {
                                 Db::run(
-                                    "UPDATE orders SET state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
+                                    "UPDATE orders SET revision=revision+1,state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
                                     [$o['id']],
                                 );
                             } elseif (
@@ -126,11 +137,11 @@ final class Dispatch
                                     $candidate['id'],
                                 ]);
                                 Db::run(
-                                    "UPDATE orders SET state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
+                                    "UPDATE orders SET revision=revision+1,state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
                                     [$o['id']],
                                 );
                             }
-                        };
+                        }
                     }
                 }
             }
@@ -155,21 +166,13 @@ final class Dispatch
             }
             foreach ($waiting as $c) {
                 $offer = Db::data($c['offer']);
-                if (
-                    !Db::one('SELECT id FROM companies WHERE id=? AND enabled=1', [
-                        $c['company_id'],
-                    ]) ||
-                    !Db::one('SELECT id FROM centers WHERE id=? AND company_id=? AND enabled=1', [
-                        $c['center_id'],
-                        $c['company_id'],
-                    ])
-                ) {
+                if (!self::eligible($o, $c)) {
                     Db::run("UPDATE candidates SET state='REJECTED' WHERE id=?", [$c['id']]);
                     continue;
                 }
                 if (
                     Db::run(
-                        "UPDATE orders SET state='DISPATCHING',candidate_id=?,company_id=?,amount=?,updated_at=? WHERE id=? AND state='QUEUED'",
+                        "UPDATE orders SET revision=revision+1,state='DISPATCHING',candidate_id=?,company_id=?,amount=?,updated_at=? WHERE id=? AND state='QUEUED'",
                         [
                             $c['id'],
                             $c['company_id'],
@@ -194,7 +197,7 @@ final class Dispatch
                         in_array($e->key, ['DEPOT_BUSY', 'CAPACITY_EXCEEDED', 'SERVER_BUSY'], true)
                     ) {
                         Db::run(
-                            "UPDATE orders SET state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
+                            "UPDATE orders SET revision=revision+1,state='QUEUED',candidate_id=NULL,company_id=NULL WHERE id=? AND state='DISPATCHING'",
                             [$o['id']],
                         );
                         continue;
@@ -260,7 +263,13 @@ final class Dispatch
         if (in_array($o['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
             return;
         }
-        $telemetry = array_replace(Db::data($o['telemetry']), $data);
+        $telemetry = Db::data($o['telemetry']);
+        $snapshotAt = max($timestamp, (int) ($data['sampledAt'] ?? 0));
+        $fresh = $sequence === null && $snapshotAt >= ($telemetry['_snapshotAt'] ?? 0);
+        if ($fresh) {
+            $telemetry = array_replace($telemetry, $data);
+            $telemetry['_snapshotAt'] = $snapshotAt;
+        }
         $telemetry['_everOnboard'] =
             ($telemetry['_everOnboard'] ?? false) ||
             ($data['onboardCount'] ?? 0) > 0 ||
@@ -279,12 +288,14 @@ final class Dispatch
         }
         $state = $o['state'];
         if (
+            $fresh &&
+            $state !== 'FINALIZING' &&
             !in_array($state, ['COMPLETED', 'CANCELLED', 'FAILED'], true) &&
             !in_array($state, ['CANCEL_REQUESTED', 'NEEDS_ATTENTION'], true)
         ) {
             $state = 'ACTIVE';
         }
-        $phase = $data['phase'] ?? '';
+        $phase = $fresh ? $data['phase'] ?? '' : '';
         if ($phase !== '' && $o['candidate_id']) {
             Db::run(
                 "UPDATE candidates SET state=CASE WHEN id=? THEN 'SELECTED' ELSE 'CANCELLED' END WHERE order_id=? AND state='WAITING'",
@@ -361,7 +372,7 @@ final class Dispatch
             }
         }
         Db::run(
-            'UPDATE orders SET state=?,telemetry=?,billing_started=?,billing_ended=?,amount=?,updated_at=? WHERE id=?',
+            'UPDATE orders SET revision=revision+1,state=?,telemetry=?,billing_started=?,billing_ended=?,amount=?,updated_at=? WHERE id=?',
             [$state, Db::json($telemetry), $start, $end, $amount, time(), $id],
         );
         if (in_array($state, ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
@@ -379,9 +390,45 @@ final class Dispatch
                     'created_at' => time(),
                     'demonstration' => 1,
                 ]);
-                Db::run('UPDATE orders SET paid=? WHERE id=?', [$amount, $id]);
+                Db::run('UPDATE orders SET revision=revision+1,paid=? WHERE id=?', [$amount, $id]);
             }
         }
+    }
+    private static function eligible(array $o, array $c): bool
+    {
+        if (!Db::one('SELECT id FROM companies WHERE id=? AND enabled=1', [$c['company_id']])) {
+            return false;
+        }
+        $center = Db::one('SELECT depots FROM centers WHERE id=? AND company_id=? AND enabled=1', [
+            $c['center_id'],
+            $c['company_id'],
+        ]);
+        if (!$center) {
+            return false;
+        }
+        $params = Db::data($c['params']);
+        $matches = array_filter(
+            Db::data($center['depots']),
+            fn($d) => $d['depotId'] === $params['depotId'] &&
+                $d['sidingId'] === $params['sidingId'],
+        );
+        if (!$matches) {
+            return false;
+        }
+        foreach (
+            ['pickup_id' => 'pickupPlatformId', 'dropoff_id' => 'dropoffPlatformId']
+            as $point => $platform
+        ) {
+            if (
+                !Db::one(
+                    'SELECT p.id FROM points p JOIN company_points c ON c.point_id=p.id JOIN point_platforms r ON r.point_id=p.id WHERE p.id=? AND p.enabled=1 AND c.company_id=? AND r.platform_id=?',
+                    [$o[$point], $c['company_id'], $params[$platform]],
+                )
+            ) {
+                return false;
+            }
+        }
+        return true;
     }
     public static function finish(array $o, string $state, string $event, int $amount): void
     {
@@ -390,12 +437,10 @@ final class Dispatch
             if (!$current || $current['state'] !== $o['state']) {
                 return;
             }
-            Db::run('UPDATE orders SET state=?,amount=?,updated_at=? WHERE id=?', [
-                $state,
-                $amount,
-                time(),
-                $o['id'],
-            ]);
+            Db::run(
+                'UPDATE orders SET revision=revision+1,state=?,amount=?,updated_at=? WHERE id=?',
+                [$state, $amount, time(), $o['id']],
+            );
             Db::run(
                 "UPDATE candidates SET state='CANCELLED' WHERE order_id=? AND state='WAITING'",
                 [$o['id']],
@@ -410,7 +455,10 @@ final class Dispatch
                     'created_at' => time(),
                     'demonstration' => 1,
                 ]);
-                Db::run('UPDATE orders SET paid=? WHERE id=?', [$amount, $o['id']]);
+                Db::run('UPDATE orders SET revision=revision+1,paid=? WHERE id=?', [
+                    $amount,
+                    $o['id'],
+                ]);
             }
         };
         if (Db::pdo()->inTransaction()) {
