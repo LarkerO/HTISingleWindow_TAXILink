@@ -90,12 +90,19 @@ final class ApiController
                 Db::run('DELETE FROM oauth_states WHERE id=?', [$x['id']]);
                 return $x;
             });
+            if ($r->get('error')) {
+                throw new AppError('OAUTH_DENIED', 'Portal 授权未完成，请返回应用重新登录', 403);
+            }
+            $code = $r->get('code');
+            if (!is_string($code) || $code === '') {
+                throw new AppError('OAUTH_CODE_MISSING', 'Portal 回调缺少授权码，请重新登录', 400);
+            }
             $issuer = rtrim(Env::get('PORTAL_ISSUER'), '/');
             $token = Http::request(
                 $issuer . '/api/oauth/token',
                 [
                     'grant_type' => 'authorization_code',
-                    'code' => (string) $r->get('code', ''),
+                    'code' => $code,
                     'redirect_uri' => Auth::oauthRedirect($entry['destination']),
                     'code_verifier' => $entry['verifier'],
                 ],
@@ -106,6 +113,13 @@ final class ApiController
                     ),
                 ],
             );
+            if (
+                !is_string($token['access_token'] ?? null) ||
+                $token['access_token'] === '' ||
+                strcasecmp((string) ($token['token_type'] ?? ''), 'Bearer') !== 0
+            ) {
+                throw new AppError('OAUTH_TOKEN_INVALID', 'Portal 返回的令牌格式无效', 502);
+            }
             $profile = Http::request($issuer . '/api/oauth/userinfo', null, [
                 'Authorization: Bearer ' . $token['access_token'],
             ]);
@@ -115,9 +129,11 @@ final class ApiController
                     Env::get($entry['destination'] === 'admin' ? 'ADMIN_ORIGIN' : 'APP_ORIGIN'),
                     '/',
                 ) . Auth::returnPath($entry['return_to'] ?? '/'),
-            )->withHeader('Set-Cookie', [
-                Auth::cookie('tl_session', $session, 7200),
-                Auth::cookie('tl_oauth', '', 0),
+            )->withHeaders([
+                'Set-Cookie' => [
+                    Auth::cookie('tl_session', $session, 7200),
+                    Auth::cookie('tl_oauth', '', 0),
+                ],
             ]);
         }
         if ($method === 'POST' && $path === '/api/auth/demo') {

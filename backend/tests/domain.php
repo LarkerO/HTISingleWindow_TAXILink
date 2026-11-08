@@ -340,7 +340,7 @@ $request = new \support\Request(
         "\r\n\r\n" .
         $body,
 );
-$response = new \app\controller\ApiController()->handle($request);
+$response = (new \app\controller\ApiController())->handle($request);
 check($response->getStatusCode() === 200, '管理员可主动关闭模组重启回收订单');
 $closed = Db::one('SELECT * FROM orders WHERE id=?', [$p['id']]);
 check(

@@ -63,37 +63,59 @@ final class Auth
     }
     public static function login(array $profile): string
     {
-        if (!is_string($profile['sub'] ?? null) || !$profile['sub']) {
+        if (
+            !is_string($profile['sub'] ?? null) ||
+            !$profile['sub'] ||
+            strlen($profile['sub']) > 128
+        ) {
             throw new AppError('PROFILE_INVALID', '账号资料缺少身份标识', 502);
         }
-        $user = Db::one('SELECT * FROM users WHERE portal_sub=?', [$profile['sub']]);
-        if (!$user) {
-            $user = [
-                'id' => Db::id(),
-                'portal_sub' => $profile['sub'],
-                'username' => $profile['preferred_username'] ?? ($profile['name'] ?? '乘客'),
-                'avatar' => $profile['picture'] ?? null,
-                'first_login' => time(),
-                'platform_admin' =>
-                    (int) (Env::get('PLATFORM_ADMIN_SUB') !== '' &&
-                        hash_equals(Env::get('PLATFORM_ADMIN_SUB'), $profile['sub'])),
-            ];
-            Db::insert('users', $user);
-        } else {
+        if (isset($profile['status']) && $profile['status'] !== 'ACTIVE') {
+            throw new AppError('ACCOUNT_INACTIVE', 'Portal 账号当前不可用', 403);
+        }
+        $username = $profile['preferred_username'] ?? ($profile['name'] ?? '乘客');
+        $avatar = $profile['picture'] ?? null;
+        if (
+            !is_string($username) ||
+            trim($username) === '' ||
+            mb_strlen($username) > 120 ||
+            ($avatar !== null && !is_string($avatar))
+        ) {
+            throw new AppError('PROFILE_INVALID', 'Portal 账号资料格式无效', 502);
+        }
+        return Db::tx(function () use ($profile, $username, $avatar): string {
+            // Atomic create-or-find preserves one identity across simultaneous passenger/admin callbacks.
+            $sql =
+                'INSERT INTO users (id,portal_sub,username,avatar,first_login,platform_admin) VALUES (?,?,?,?,?,?)';
+            $sql .= Db::sqlite()
+                ? ' ON CONFLICT(portal_sub) DO NOTHING'
+                : ' ON DUPLICATE KEY UPDATE portal_sub=portal_sub';
+            Db::run($sql, [
+                Db::id(),
+                $profile['sub'],
+                $username,
+                $avatar,
+                time(),
+                (int) (Env::get('PLATFORM_ADMIN_SUB') !== '' &&
+                    hash_equals(Env::get('PLATFORM_ADMIN_SUB'), $profile['sub'])),
+            ]);
+            $user = Db::one('SELECT * FROM users WHERE portal_sub=?' . Db::lock(), [
+                $profile['sub'],
+            ]);
             Db::run('UPDATE users SET username=?,avatar=? WHERE id=?', [
-                $profile['preferred_username'] ?? ($profile['name'] ?? $user['username']),
-                $profile['picture'] ?? null,
+                $username,
+                $avatar,
                 $user['id'],
             ]);
-        }
-        $token = bin2hex(random_bytes(32));
-        Db::insert('sessions', [
-            'id' => hash('sha256', $token),
-            'user_id' => $user['id'],
-            'csrf' => Db::id(),
-            'expires' => time() + 7200,
-        ]);
-        return $token;
+            $token = bin2hex(random_bytes(32));
+            Db::insert('sessions', [
+                'id' => hash('sha256', $token),
+                'user_id' => $user['id'],
+                'csrf' => Db::id(),
+                'expires' => time() + 7200,
+            ]);
+            return $token;
+        });
     }
     public static function publicUser(array $user): array
     {

@@ -36,6 +36,10 @@ TAXILINK_MOD_PUBLIC_KEY=keys/mod-public.pem
 
 Portal 客户端必须同时登记乘客端与管理端两个回调地址，分别回到发起登录的站点设置会话 Cookie；不要将管理端回调配置到乘客域名。邀请页与行程页登录后保留本地返回路径。
 
+账号复核基于 Portal `v2` 分支 `497db20` 的授权、token 和 userinfo 实现。运行 `npm run test:oauth` 可验证真实 TAXILink 回调控制器与本地 Portal 协议夹具：JSON 换码、Basic 认证、PKCE S256、两端回调、多条 Cookie、state 重放/过期、用户资料更新及并发首次登录。夹具不是线上 Portal，仍需在部署环境填写 Client ID/Secret 并完成实际授权。
+
+用户身份仅以 Portal `sub` 关联；不要求 Minecraft 绑定，不从 Portal `role` 自动授予平台/企业权限。两端可使用同一 Portal 账号，分别建立应用会话。Portal access/refresh token 不下发浏览器、不保存为长期凭据。本地会话最长两小时；退出只注销当前 TAXILink 会话，不是 Portal 单点登出，Portal 撤销授权或停用账号也不会即时撤销此前的本地会话，下一次 OAuth 登录会重新在线校验。并发登录不会重复创建用户或重置首次登录日期。
+
 升级本次修复前先运行 `php backend/bin/console.php migrate`，新增 OAuth 返回路径与订单版本号，并扩大 MySQL 报价/轨迹 JSON 字段容量。重启后端进程，再发布前端。已由模组回收的 `RECOVERED` 订单可由管理员取消并按失败订单零费用关闭，保留审计与演示退款记录。
 
 复用 TAXILink_MOD 的 `examples/php/init-sm2.ps1` 生成两套独立密钥，或依据其协议用 OpenSSL 3 生成 SM2 密钥。业务后端保存网关私钥和固定的模组公钥；游戏服保存模组私钥和固定的网关公钥，私钥不得进入浏览器或 Git。
