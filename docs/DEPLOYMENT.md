@@ -12,7 +12,7 @@
    npm run build
    ```
 
-2. 按 `deploy/nginx.conf.example` 配置两个站点。管理端的 `/install` 由前端接管，`/api/` 和 OAuth 回调由同一主机代理到后端。按本文的 systemd 示例启动后端。服务账号需要能写入 `backend/runtime` 和 `backend/installation`，若部署目录归其他账号管理，请预先创建这两个目录并设置所有者。
+2. 按[服务账号与目录权限](#服务账号与目录权限)准备目录后，参照 `deploy/nginx.conf.example` 配置两个站点，再按本文的 systemd 示例启动后端。管理端的 `/install` 由前端接管，`/api/` 和 OAuth 回调由同一主机代理到后端。
 3. 在 Portal 的 `/admin/oauth-clients` 创建 OAuth 客户端，勾选 `profile` 与 `hydroline`，每行登记一个回调。正式登录与安装联调共用管理端回调。
 
    ```text
@@ -23,7 +23,7 @@
 4. 在项目根目录以**后端服务账号**生成安装码，有效期 30 分钟。再次生成会作废上一份安装码及尚未完成的授权。
 
    ```bash
-   sudo -u www-data php backend/bin/console.php install-code
+   sudo -u www-data php /srv/taxilink/backend/bin/console.php install-code
    ```
 
 5. 打开 `https://taxi-admin.example.com/install`，检查环境，填写安装码、乘客站地址、MySQL 和 Redis 连接、Portal 客户端凭据以及游戏服信息。点击“验证配置并前往 Portal 登录”，确认用预定的管理员账号授权。回调成功后，后端生成并验证两套 SM2 密钥，初始化数据库，将该账号设为首位平台管理员。
@@ -33,6 +33,39 @@
 向导将配置写入 `backend/installation/config.json`，后端重启时读取该文件。请在升级和备份时保留整个 `backend/installation` 目录，其中包含凭据和私钥。界面不会显示私钥。安装完成后不能再使用安装码认领管理员。已有 `backend/.env`、外部环境变量 `DB_DSN` 或安装配置的实例会被识别为已配置，按原部署方式维护。
 
 如果数据库初始化中途失败，修复数据库权限后，用相同的数据库连接地址、库名和已授权的 Portal 账号重新提交。可在服务器重新签发过期的安装码。
+
+## 服务账号与目录权限
+
+以下用 `www-data` 作为后端服务账号。若 systemd 的 `User=` 或 `Group=` 不同，请替换为实际值。管理员以部署账号构建前端和安装 Composer 依赖，后端服务账号只需读取代码与依赖。Nginx 工作进程需要读取 `admin/dist` 和 `passenger/dist`。
+
+推荐部署在 `/srv/taxilink`。在项目根目录执行以下命令，创建后端专用的可写目录，再以服务账号验证权限：
+
+```bash
+project="$(pwd -P)"
+sudo install -d -m 0700 -o www-data -g www-data "$project/backend/runtime" "$project/backend/installation"
+sudo -u www-data test -x "$project/backend" &&
+  sudo -u www-data test -r "$project/backend/bin/console.php" &&
+  sudo -u www-data test -r "$project/backend/vendor/autoload.php" &&
+  sudo -u www-data test -w "$project/backend/runtime" &&
+  sudo -u www-data test -w "$project/backend/installation" &&
+  echo "权限检查通过"
+```
+
+如果已经用其他账号启动过服务，检查 `runtime` 内的既有日志、锁和缓存是否也可由服务账号访问。已有 `installation` 目录可能包含正式配置和私钥，调整归属前先确认它对应当前实例。
+
+若仓库在家目录，`chdir(): Permission denied` 通常表示服务账号缺少某一级目录的进入权限。用以下命令查看路径上的每一级：
+
+```bash
+namei -l "$project/backend/vendor/autoload.php"
+```
+
+可以迁移到 `/srv/taxilink` 并同步修改 systemd 和 Nginx 路径。若保留在家目录，可用 POSIX ACL 按需授权。比如仅家目录缺少权限时，从部署账号的终端执行：
+
+```bash
+sudo setfacl -m u:www-data:--x "$HOME"
+```
+
+如果 `namei` 显示项目目录或其他上级目录也有限制，对对应目录同样授予服务账号 `--x`。如果后端代码、Composer 依赖或前端产物无法读取，仅对所需的目录和文件授权，目录需要 `x`，文件需要 `r`。家目录只授予进入权限即可。避免 `chmod -R 777`，并保留配置和私钥的访问限制。权限检查通过后，运行 `sudo -u www-data php "$project/backend/bin/console.php" install-code`。
 
 ## 手动部署（Linux + Nginx）
 

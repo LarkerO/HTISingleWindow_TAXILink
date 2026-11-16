@@ -55,7 +55,7 @@ Linux 从 `backend` 运行 `php start.php start`。首次运行请访问上述 *
 检查仅在本地执行，仓库不配置远端 CI。
 
 ```powershell
-npm test                 # 领域测试与首次数据库初始化检查
+npm test                 # 领域测试、数据库初始化与 Portal OAuth 回归
 npm run build           # 两端类型检查与生产构建
 npm run test:api        # 需先启动演示后端
 npx playwright install chromium
@@ -66,6 +66,10 @@ npm run test:e2e        # 需先启动后端和两个 Vite 开发服务
 
 ## 对接与部署
 
+正式部署支持从管理端 **`/install`** 开始。准备两个 HTTPS 域名、空 MySQL 库和 Redis，启动后端后，以 systemd 的 `User=` 指定的服务账号生成安装码。向导会验证连接、联调 Portal、校验 SM2 密钥，并将完成授权的账号设为首位平台管理员。页面显示成功后重启后端一次。
+
+部署前请检查目录权限。服务账号需要能穿过项目路径上的每一级目录，读取 PHP 源码和 Composer 依赖，并写入 `backend/runtime` 和 `backend/installation`。Nginx 的工作进程账号还需要能读取两个前端的 `dist`。仓库位于 `~/` 时，家目录权限也会影响 `sudo -u www-data`。如遇 `chdir(): Permission denied`，按[目录权限排查步骤](docs/DEPLOYMENT.md#服务账号与目录权限)逐级检查。
+
 详见 [架构与业务规则](docs/ARCHITECTURE.md)、[接口说明](docs/API.md)、[真实环境接入](docs/DEPLOYMENT.md)。前端编译产物分别位于 `admin/dist`、`passenger/dist`，由反向代理提供 SPA 回退。
 
-当前已完成本地模拟链路验证；真实 Portal 客户端配置、SM2 模组连接、实际 MTR 地图、MySQL/Redis 及正式域名需要在目标环境联调。真实货币接口尚未接入。
+首次安装已用隔离 MariaDB、Redis 和模拟 Portal 验证。正式部署仍需在目标环境验证 Portal 授权、SM2 模组连接和实际 MTR 地图。支付为演示模式。
