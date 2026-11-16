@@ -102,6 +102,12 @@ final class Install
 
     private static function openssl(): string
     {
+        if (PHP_OS_FAMILY === 'Windows' && Env::get('TAXILINK_OPENSSL') === '') {
+            $bundled = Env::get('ProgramFiles', 'C:\\Program Files') . '\\Git\\usr\\bin\\openssl.exe';
+            if (is_file($bundled)) {
+                return $bundled;
+            }
+        }
         return Env::get('TAXILINK_OPENSSL', 'openssl');
     }
 

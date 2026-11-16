@@ -22,6 +22,8 @@ npm ci
 
 OpenSSL 加入 PATH，或通过进程环境变量 `TAXILINK_OPENSSL` 指定可执行文件绝对路径。安装前运行 `php -m` 和 `openssl version` 检查环境。
 
+Windows 安装向导会自动识别默认路径下 Git for Windows 附带的 OpenSSL。也可从 [Git for Windows 官方发布页](https://github.com/git-for-windows/git/releases/latest) 下载 PortableGit，解压后将 `TAXILINK_OPENSSL` 指向包内的 `usr\bin\openssl.exe`，并保留同目录的依赖 DLL。
+
 ## 本机测试安装
 
 Windows 和 Linux 均可使用此流程。安装和运行使用同一个普通账号。测试后端和前端仅监听回环地址。管理站与乘客站使用不同主机名隔离 Cookie，例如管理站 `http://localhost:15174`、乘客站 `http://127.0.0.1:15173`。端口可以更换，Portal 回调也要同步更新。
