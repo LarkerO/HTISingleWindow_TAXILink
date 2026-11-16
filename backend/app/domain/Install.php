@@ -342,7 +342,10 @@ final class Install
                     Auth::cookie('tl_session', $session, 7200, $secure),
                 ],
             ]);
-        } catch (\Throwable) {
+        } catch (\Throwable $error) {
+            if ($step === 'portal' && $error instanceof AppError && $error->key === 'UPSTREAM_TLS') {
+                $step = 'portal-tls';
+            }
             if (isset($keys) && !Env::configured()) {
                 self::removeKeys(dirname($keys['TAXILINK_GATEWAY_PRIVATE_KEY']));
             }

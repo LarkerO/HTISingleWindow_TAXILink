@@ -11,6 +11,7 @@ const adminOrigin = window.location.origin;
 const callback = '/api/auth/callback';
 const errors: Record<string, string> = {
   portal: 'Portal 授权失败。请检查客户端凭据、回调地址和权限后重试。',
+  'portal-tls': '后端无法验证 Portal 的 HTTPS 证书。请检查 Windows 信任的证书或 PHP 的 curl.cainfo 配置。',
   keys: 'SM2 密钥生成或双向签名校验失败。请检查 OpenSSL 和安装目录权限。',
   database: '数据库初始化失败。请检查数据库权限及是否有并发安装，再重试。',
   publish: '安装配置写入失败。请检查安装目录权限后用同一 Portal 账号重试。',
