@@ -7,6 +7,7 @@ final class AppError extends \RuntimeException
         public readonly string $key,
         string $message,
         public readonly int $status = 400,
+        public readonly array $details = [],
     ) {
         parent::__construct($message);
     }

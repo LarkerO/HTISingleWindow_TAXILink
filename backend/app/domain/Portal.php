@@ -4,6 +4,28 @@ namespace app\domain;
 
 final class Portal
 {
+    public static function errorCode(mixed $error): ?string
+    {
+        return in_array($error, [
+            'access_denied', 'invalid_request', 'invalid_client', 'invalid_grant',
+            'unauthorized_client', 'unsupported_grant_type', 'unsupported_response_type',
+            'invalid_scope', 'invalid_token', 'insufficient_scope', 'server_error',
+            'temporarily_unavailable',
+            'OAUTH_ACCESS_TOKEN_INVALID', 'OAUTH_AUTHORIZATION_CODE_INVALID',
+            'OAUTH_CLIENT_AUTHENTICATION_FAILED', 'OAUTH_CLIENT_INVALID', 'OAUTH_CLIENT_NOT_FOUND',
+            'OAUTH_GRANT_TYPE_INVALID', 'OAUTH_PKCE_INVALID', 'OAUTH_PKCE_REQUIRED',
+            'OAUTH_REDIRECT_URI_INVALID', 'OAUTH_SCOPE_INVALID', 'OAUTH_TOKEN_REQUEST_INVALID',
+        ], true) ? $error : null;
+    }
+
+    private static function request(string $stage, string $url, ?array $body, array $headers): array
+    {
+        try {
+            return Http::request($url, $body, $headers);
+        } catch (AppError $error) {
+            throw new AppError($error->key, $error->getMessage(), $error->status, ['stage' => $stage] + $error->details);
+        }
+    }
     public static function verifier(): string
     {
         return self::base64url(random_bytes(48));
@@ -43,7 +65,8 @@ final class Portal
         string $verifier,
     ): array {
         $issuer = rtrim($issuer, '/');
-        $token = Http::request(
+        $token = self::request(
+            'token',
             $issuer . '/api/oauth/token',
             [
                 'grant_type' => 'authorization_code',
@@ -58,9 +81,9 @@ final class Portal
             $token['access_token'] === '' ||
             strcasecmp((string) ($token['token_type'] ?? ''), 'Bearer') !== 0
         ) {
-            throw new AppError('OAUTH_TOKEN_INVALID', 'Portal 返回的令牌格式无效', 502);
+            throw new AppError('OAUTH_TOKEN_INVALID', 'Portal 返回的令牌格式无效', 502, ['stage' => 'token']);
         }
-        return Http::request($issuer . '/api/oauth/userinfo', null, [
+        return self::request('userinfo', $issuer . '/api/oauth/userinfo', null, [
             'Authorization: Bearer ' . $token['access_token'],
         ]);
     }

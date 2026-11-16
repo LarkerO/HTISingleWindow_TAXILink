@@ -290,7 +290,13 @@ final class Install
         $step = 'portal';
         try {
             if ($request->get('error') || !is_string($code) || $code === '') {
-                throw new \RuntimeException();
+                $oauth = Portal::errorCode($request->get('error'));
+                throw new AppError(
+                    $request->get('error') ? 'OAUTH_CALLBACK_ERROR' : 'OAUTH_CODE_MISSING',
+                    'Portal 回调未提供有效授权码',
+                    400,
+                    array_filter(['stage' => 'callback', 'oauth' => $oauth]),
+                );
             }
             $profile = Portal::profile(
                 $config['PORTAL_ISSUER'],
@@ -300,6 +306,7 @@ final class Install
                 $code,
                 $pending['verifier'],
             );
+            $step = 'profile';
             Auth::validateProfile($profile);
             $step = 'keys';
             $keys = self::generateKeys($config['TAXILINK_OPENSSL']);
@@ -349,7 +356,11 @@ final class Install
             if (isset($keys) && !Env::configured()) {
                 self::removeKeys(dirname($keys['TAXILINK_GATEWAY_PRIVATE_KEY']));
             }
-            return redirect('/install?error=' . $step)->withHeader(
+            $details = ['error' => $step];
+            if ($error instanceof AppError && in_array($step, ['portal', 'portal-tls', 'profile'], true)) {
+                $details += ['reason' => $error->key] + $error->details;
+            }
+            return redirect('/install?' . http_build_query($details))->withHeader(
                 'Set-Cookie',
                 self::cookie('', 0, $secure),
             );

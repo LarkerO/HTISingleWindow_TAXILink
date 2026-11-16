@@ -10,14 +10,33 @@ type Status = {
 const adminOrigin = window.location.origin;
 const callback = '/api/auth/callback';
 const errors: Record<string, string> = {
-  portal: 'Portal 授权失败。请检查客户端凭据、回调地址和权限后重试。',
-  'portal-tls': '后端无法验证 Portal 的 HTTPS 证书。请检查 Windows 信任的证书或 PHP 的 curl.cainfo 配置。',
+  portal: 'Portal 登录未完成，请查看下方的失败阶段和错误码。',
+  profile: '已读取 Portal 用户资料，但账号状态或资料格式无法通过验证。',
+  'portal-tls':
+    '后端无法验证 Portal 的 HTTPS 证书。请检查 Windows 信任的证书或 PHP 的 curl.cainfo 配置。',
   keys: 'SM2 密钥生成或双向签名校验失败。请检查 OpenSSL 和安装目录权限。',
   database: '数据库初始化失败。请检查数据库权限及是否有并发安装，再重试。',
   publish: '安装配置写入失败。请检查安装目录权限后用同一 Portal 账号重试。',
   account: '请使用上次已授权并开始初始化数据库的 Portal 账号继续安装。',
 };
-const initialError = new URLSearchParams(window.location.search).get('error');
+const params = new URLSearchParams(window.location.search);
+const initialError = params.get('error');
+const stages: Record<string, string> = {
+  callback: '处理授权回调',
+  token: '换取令牌（/api/oauth/token）',
+  userinfo: '读取用户资料（/api/oauth/userinfo）',
+};
+const stage = params.get('stage');
+const diagnostic = [
+  stage && Object.hasOwn(stages, stage) ? stages[stage] : '',
+  ...(['http', 'oauth', 'curl', 'reason'] as const).map((key) => {
+    const value = params.get(key);
+    const label = { http: 'HTTP', oauth: 'OAuth', curl: 'cURL', reason: '错误码' }[key];
+    return value && /^[a-zA-Z0-9_]{1,48}$/.test(value) ? `${label} ${value}` : '';
+  }),
+]
+  .filter(Boolean)
+  .join(' · ');
 
 export default function InstallPage() {
   const [status, setStatus] = useState<Status>();
@@ -65,7 +84,9 @@ export default function InstallPage() {
       <Card>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <Typography.Title level={2}>安装 TAXILink</Typography.Title>
-          {failure && <Alert showIcon type="error" message={failure} />}
+          {failure && (
+            <Alert showIcon type="error" message={failure} description={diagnostic || undefined} />
+          )}
           {!status && (busy ? <Spin /> : <Button onClick={loadStatus}>重新检查</Button>)}
           {status?.state === 'installed' && (
             <>

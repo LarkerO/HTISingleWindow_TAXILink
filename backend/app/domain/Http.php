@@ -28,16 +28,32 @@ final class Http
             curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => Db::json($data)]);
         }
         $raw = curl_exec($ch);
-        if ($raw === false && in_array(curl_errno($ch), [CURLE_SSL_CACERT, CURLE_SSL_CACERT_BADFILE], true)) {
-            throw new AppError('UPSTREAM_TLS', '上游 HTTPS 证书验证失败，请检查 PHP 信任的 CA', 502);
+        $errno = curl_errno($ch);
+        $details = [];
+        if ($raw === false && $errno !== 0) {
+            $details['curl'] = $errno;
+        }
+        if ($raw === false && in_array($errno, [CURLE_SSL_CACERT, CURLE_SSL_CACERT_BADFILE], true)) {
+            throw new AppError('UPSTREAM_TLS', '上游 HTTPS 证书验证失败，请检查 PHP 信任的 CA', 502, $details);
         }
         $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        if ($raw === false || $status >= 500 || $status === 0) {
-            throw new AppError('UPSTREAM_UNCERTAIN', '服务暂不可用，正在核对请求状态', 503);
+        if ($status !== 0) {
+            $details['http'] = $status;
         }
-        $result = json_decode($raw, true, 64, JSON_THROW_ON_ERROR);
-        if ($status >= 400) {
-            throw new AppError('UPSTREAM_REJECTED', '上游服务拒绝请求', 502);
+        if ($raw === false || $status >= 500 || $status === 0) {
+            throw new AppError('UPSTREAM_UNCERTAIN', '服务暂不可用，正在核对请求状态', 503, $details);
+        }
+        $result = json_decode($raw, true, 64);
+        if ($status >= 300) {
+            $oauth = Portal::errorCode($result['error'] ?? null)
+                ?? Portal::errorCode($result['data']['code'] ?? null);
+            if ($oauth !== null) {
+                $details['oauth'] = $oauth;
+            }
+            throw new AppError('UPSTREAM_REJECTED', '上游服务拒绝请求', 502, $details);
+        }
+        if (!is_array($result)) {
+            throw new AppError('UPSTREAM_INVALID_RESPONSE', '上游返回的响应格式无效', 502, $details);
         }
         return $result;
     }

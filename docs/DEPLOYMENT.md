@@ -161,7 +161,7 @@ https://taxi.example.com/api/auth/callback
 
 - 回调被拒绝时，核对 Portal 登记的 URI 及浏览器地址。
 - `invalid_scope` 时检查是否同时勾选两项权限。
-- 换码失败时检查客户端凭据、Portal 地址、服务器时间和 HTTPS 证书。Windows 上未设置 `curl.cainfo` 时，支持原生 CA 的 PHP cURL 会使用 Windows 信任库。若仍提示证书错误，用 `php --ini` 确认 CLI 配置及所用 CA，修改后重启后端。
+- 安装页会显示授权回调、换码或读取资料的失败阶段，以及可用的 HTTP 状态、Portal 错误码或 cURL 编号。换码失败时按错误码检查客户端凭据、回调地址、服务器时间或 HTTPS 证书。Windows 上未设置 `curl.cainfo` 时，支持原生 CA 的 PHP cURL 会使用 Windows 信任库。若仍提示证书错误，用 `php --ini` 确认 CLI 配置及所用 CA，修改后重启后端。
 - 回来仍未登录时检查同源 `/api/` 代理，以及是否使用登记时的主机名和端口。
 - 迁移中断时修复存储权限，使用原数据库和原授权账号重试。安装码过期可重新签发。
 
