@@ -4,6 +4,7 @@ import { Alert, Button, Card, Form, Input, Space, Spin, Typography } from 'antd'
 type Status = {
   state: 'setup' | 'restart' | 'installed';
   requirements: Record<string, boolean>;
+  local: boolean;
 };
 
 const adminOrigin = window.location.origin;
@@ -22,6 +23,10 @@ export default function InstallPage() {
   const [failure, setFailure] = useState(initialError ? errors[initialError] : undefined);
   const [busy, setBusy] = useState(false);
   const [passenger, setPassenger] = useState('');
+  const validOrigin = status?.local
+    ? window.location.protocol === 'http:' &&
+      ['localhost', '127.0.0.1'].includes(window.location.hostname)
+    : window.location.protocol === 'https:';
 
   function loadStatus() {
     setBusy(true);
@@ -125,31 +130,50 @@ export default function InstallPage() {
                   <Input readOnly value={adminOrigin} />
                 </Form.Item>
                 <Form.Item
-                  label="乘客端 HTTPS 地址"
+                  label={status.local ? '乘客端本机 HTTP 地址' : '乘客端 HTTPS 地址'}
                   name="passengerOrigin"
                   rules={[{ required: true }]}
                 >
                   <Input
-                    placeholder="https://taxi.example.com"
+                    placeholder={
+                      status.local ? 'http://127.0.0.1:5173' : 'https://taxi.example.com'
+                    }
                     onChange={(e) => setPassenger(e.target.value)}
                   />
                 </Form.Item>
-                <Typography.Title level={4}>数据库与 Redis</Typography.Title>
-                <Typography.Paragraph>请先在 MySQL 创建专用空数据库和账号。</Typography.Paragraph>
-                {(
-                  [
-                    ['dbHost', 'MySQL 主机'],
-                    ['dbPort', 'MySQL 端口'],
-                    ['dbName', '数据库名称'],
-                    ['dbUser', '数据库账号'],
-                    ['dbPassword', '数据库密码'],
-                    ['redisUrl', 'Redis 连接地址'],
-                  ] as const
-                ).map(([name, label]) => (
-                  <Form.Item key={name} label={label} name={name} rules={[{ required: true }]}>
-                    {name === 'dbPassword' || name === 'redisUrl' ? <Input.Password /> : <Input />}
-                  </Form.Item>
-                ))}
+                {status.local ? (
+                  <Alert
+                    showIcon
+                    type="info"
+                    message="本机测试模式"
+                    description="使用 SQLite，自动创建数据库。仍使用 Portal 登录、SM2 和真实调度，不加载演示数据。"
+                  />
+                ) : (
+                  <>
+                    <Typography.Title level={4}>数据库与 Redis</Typography.Title>
+                    <Typography.Paragraph>
+                      请先在 MySQL 创建专用空数据库和账号。
+                    </Typography.Paragraph>
+                    {(
+                      [
+                        ['dbHost', 'MySQL 主机'],
+                        ['dbPort', 'MySQL 端口'],
+                        ['dbName', '数据库名称'],
+                        ['dbUser', '数据库账号'],
+                        ['dbPassword', '数据库密码'],
+                        ['redisUrl', 'Redis 连接地址'],
+                      ] as const
+                    ).map(([name, label]) => (
+                      <Form.Item key={name} label={label} name={name} rules={[{ required: true }]}>
+                        {name === 'dbPassword' || name === 'redisUrl' ? (
+                          <Input.Password />
+                        ) : (
+                          <Input />
+                        )}
+                      </Form.Item>
+                    ))}
+                  </>
+                )}
                 <Typography.Title level={4}>HydCraft Portal</Typography.Title>
                 <Typography.Paragraph>
                   在 Portal 的 /admin/oauth-clients 创建客户端，勾选 profile 和
@@ -158,7 +182,8 @@ export default function InstallPage() {
                 <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                   {adminOrigin + callback}
                   {'\n'}
-                  {(passenger || 'https://你的乘客端域名') + callback}
+                  {(passenger ||
+                    (status.local ? 'http://127.0.0.1:5173' : 'https://你的乘客端域名')) + callback}
                 </pre>
                 {(
                   [
@@ -178,17 +203,20 @@ export default function InstallPage() {
                   htmlType="submit"
                   loading={busy}
                   disabled={
-                    window.location.protocol !== 'https:' ||
-                    Object.values(status.requirements).some((passed) => !passed)
+                    !validOrigin || Object.values(status.requirements).some((passed) => !passed)
                   }
                 >
                   验证配置并前往 Portal 登录
                 </Button>
-                {window.location.protocol !== 'https:' && (
+                {!validOrigin && (
                   <Alert
                     style={{ marginTop: 12 }}
                     type="warning"
-                    message="请使用管理端 HTTPS 地址打开安装页。"
+                    message={
+                      status.local
+                        ? '请用 localhost 或 127.0.0.1 的 HTTP 地址打开管理端。'
+                        : '请使用管理端 HTTPS 地址打开安装页。'
+                    }
                   />
                 )}
               </Form>

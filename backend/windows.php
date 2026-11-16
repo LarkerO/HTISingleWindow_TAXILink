@@ -113,11 +113,11 @@ if ($monitorConfig = config('process.monitor.constructor')) {
 
 function popen_processes($processFiles)
 {
-    $cmd = '"' . PHP_BINARY . '" ' . implode(' ', $processFiles);
+    $cmd = [PHP_BINARY, ...$processFiles];
     $descriptorspec = [STDIN, STDOUT, STDOUT];
     $resource = proc_open($cmd, $descriptorspec, $pipes, null, null, ['bypass_shell' => true]);
     if (!$resource) {
-        exit("Can not execute $cmd\r\n");
+        exit("无法启动 TAXILink 工作进程\r\n");
     }
     return $resource;
 }

@@ -163,6 +163,9 @@ final class Db
                 'id VARCHAR(64) PRIMARY KEY, params TEXT NOT NULL, created_at BIGINT NOT NULL, departed_at BIGINT, destroyed INTEGER NOT NULL DEFAULT 0',
             'dispatch_sequence' => 'id INTEGER PRIMARY KEY, ticket BIGINT NOT NULL',
         ];
+        if (self::sqlite()) {
+            $definitions['rate_limits'] = 'id VARCHAR(128) PRIMARY KEY, minute BIGINT NOT NULL, hits INTEGER NOT NULL';
+        }
         foreach ($definitions as $table => $definition) {
             self::pdo()->exec("CREATE TABLE IF NOT EXISTS $table ($definition)");
         }

@@ -53,6 +53,18 @@ final class Env
     {
         return getenv($key) === false ? $default : (string) getenv($key);
     }
+    public static function listener(string $key, string $default): string
+    {
+        $address = self::get($key, $default);
+        if (
+            (self::get('APP_ENV') === 'testing' ||
+                (self::installMode() && self::get('TAXILINK_LOCAL_INSTALL') === '1')) &&
+            parse_url($address, PHP_URL_HOST) !== '127.0.0.1'
+        ) {
+            throw new \RuntimeException("测试安装要求 $key 绑定 127.0.0.1");
+        }
+        return $address;
+    }
     public static function demo(): bool
     {
         return self::get('DEMO_MODE', '0') === '1';

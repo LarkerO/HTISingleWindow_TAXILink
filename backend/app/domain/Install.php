@@ -42,6 +42,7 @@ final class Install
                         : 'setup')
                     : 'installed',
                 'requirements' => Env::configured() ? [] : self::requirements(),
+                'local' => self::local(),
             ];
         }
         self::requireOpen();
@@ -59,6 +60,11 @@ final class Install
         if (Env::configured()) {
             throw new AppError('INSTALL_CLOSED', '安装入口已关闭', 404);
         }
+    }
+
+    private static function local(): bool
+    {
+        return Env::get('TAXILINK_LOCAL_INSTALL') === '1';
     }
 
     private static function requirements(): array
@@ -79,7 +85,11 @@ final class Install
         }
         return $cached = [
             'PHP 8.2+' => PHP_VERSION_ID >= 80200,
-            'PDO MySQL' => in_array('mysql', \PDO::getAvailableDrivers(), true),
+            self::local() ? 'PDO SQLite' : 'PDO MySQL' => in_array(
+                self::local() ? 'sqlite' : 'mysql',
+                \PDO::getAvailableDrivers(),
+                true,
+            ),
             'curl / mbstring' => extension_loaded('curl') && extension_loaded('mbstring'),
             'pcntl / posix (Linux)' =>
                 PHP_OS_FAMILY === 'Windows' ||
@@ -114,54 +124,40 @@ final class Install
         if (in_array(false, self::requirements(), true)) {
             throw new AppError('REQUIREMENTS_FAILED', '请先修复未通过的安装要求', 422);
         }
-        $admin = self::origin(self::value($body, 'adminOrigin'));
-        $passenger = self::origin(self::value($body, 'passengerOrigin'));
+        $local = self::local();
+        $admin = self::origin(self::value($body, 'adminOrigin'), $local);
+        $passenger = self::origin(self::value($body, 'passengerOrigin'), $local);
         if (
             parse_url($admin, PHP_URL_HOST) === parse_url($passenger, PHP_URL_HOST) ||
             $request->header('origin') !== $admin
         ) {
             throw new AppError(
                 'INSTALL_ORIGIN_INVALID',
-                '请从填写的管理端 HTTPS 地址访问，且两端需使用不同主机名',
+                '请从填写的管理端地址访问，且两端需使用不同主机名',
                 422,
             );
         }
-        $redis = self::value($body, 'redisUrl');
-        if (!preg_match('#^(?:tcp|tls)://#D', $redis)) {
-            throw new AppError(
-                'INSTALL_INPUT_INVALID',
-                'Redis 地址须以 tcp:// 或 tls:// 开头',
-                422,
-            );
-        }
-        $host = self::value($body, 'dbHost', '/^[a-zA-Z0-9.-]+$/D');
-        $database = self::value($body, 'dbName', '/^[a-zA-Z0-9_]+$/D');
-        $port = filter_var($body['dbPort'] ?? null, FILTER_VALIDATE_INT, [
-            'options' => ['min_range' => 1, 'max_range' => 65535],
-        ]);
-        if ($port === false) {
-            throw new AppError('INSTALL_INPUT_INVALID', 'MySQL 端口无效', 422);
-        }
-        $config = [
-            'APP_ENV' => 'production',
-            'DEMO_MODE' => '0',
-            'APP_SECURE_COOKIE' => '1',
-            'APP_ORIGIN' => $passenger,
-            'ADMIN_ORIGIN' => $admin,
-            'DB_DSN' => "mysql:host=$host;port=$port;dbname=$database;charset=utf8mb4",
-            'DB_USER' => self::value($body, 'dbUser'),
-            'DB_PASSWORD' => self::value($body, 'dbPassword'),
-            'REDIS_URL' => $redis,
-            'PORTAL_ISSUER' => self::origin(self::value($body, 'portalIssuer')),
-            'PORTAL_CLIENT_ID' => self::value($body, 'clientId'),
-            'PORTAL_CLIENT_SECRET' => self::value($body, 'clientSecret'),
-            'PORTAL_REDIRECT_URI' => $passenger . self::CALLBACK,
-            'PORTAL_ADMIN_REDIRECT_URI' => $admin . self::CALLBACK,
-            'GATEWAY_TOKEN' => bin2hex(random_bytes(32)),
-            'TAXILINK_OPENSSL' => self::openssl(),
-            'TAXILINK_SERVER_ID' => self::value($body, 'serverId', '/^[a-zA-Z0-9_.-]{1,64}$/D'),
-            'TAXILINK_DIMENSION' => self::value($body, 'dimension', '#^[a-z0-9_./:-]{1,128}$#D'),
-        ];
+        $config =
+            [
+                'APP_ENV' => $local ? 'testing' : 'production',
+                'DEMO_MODE' => '0',
+                'APP_SECURE_COOKIE' => $local ? '0' : '1',
+                'APP_ORIGIN' => $passenger,
+                'ADMIN_ORIGIN' => $admin,
+                'PORTAL_ISSUER' => self::origin(self::value($body, 'portalIssuer')),
+                'PORTAL_CLIENT_ID' => self::value($body, 'clientId'),
+                'PORTAL_CLIENT_SECRET' => self::value($body, 'clientSecret'),
+                'PORTAL_REDIRECT_URI' => $passenger . self::CALLBACK,
+                'PORTAL_ADMIN_REDIRECT_URI' => $admin . self::CALLBACK,
+                'GATEWAY_TOKEN' => bin2hex(random_bytes(32)),
+                'TAXILINK_OPENSSL' => self::openssl(),
+                'TAXILINK_SERVER_ID' => self::value($body, 'serverId', '/^[a-zA-Z0-9_.-]{1,64}$/D'),
+                'TAXILINK_DIMENSION' => self::value(
+                    $body,
+                    'dimension',
+                    '#^[a-z0-9_./:-]{1,128}$#D',
+                ),
+            ] + self::storageConfig($body, $local);
         try {
             $pdo = self::database($config);
             if (!self::claim($config)) {
@@ -172,24 +168,14 @@ final class Install
         } catch (\Throwable) {
             throw new AppError(
                 'INSTALL_DB_FAILED',
-                'MySQL 连接或读取失败，请检查地址、库名和账号权限',
+                $local
+                    ? 'SQLite 打开失败，请检查安装目录权限'
+                    : 'MySQL 连接或读取失败，请检查地址、库名和账号权限',
                 422,
             );
         }
-        try {
-            $client = new \Predis\Client($redis, [
-                'parameters' => ['timeout' => 3, 'read_write_timeout' => 3],
-            ]);
-            $key = 'taxilink:install:' . bin2hex(random_bytes(16));
-            if ($client->eval("return redis.call('SET',KEYS[1],'1','EX',5)", 1, $key) != 'OK') {
-                throw new \RuntimeException();
-            }
-        } catch (\Throwable) {
-            throw new AppError(
-                'INSTALL_REDIS_FAILED',
-                'Redis 连接或写入失败，请检查地址、认证和权限',
-                422,
-            );
+        if (!$local) {
+            self::checkRedis($config['REDIS_URL']);
         }
         $state = bin2hex(random_bytes(32));
         $verifier = Portal::verifier();
@@ -208,7 +194,60 @@ final class Install
                 $state,
                 $verifier,
             ),
-        ])->withHeader('Set-Cookie', self::cookie($state, 600));
+        ])->withHeader('Set-Cookie', self::cookie($state, 600, !$local));
+    }
+
+    private static function storageConfig(array $body, bool $local): array
+    {
+        if ($local) {
+            return [
+                'DB_DSN' => 'sqlite:' . self::file('taxilink.sqlite'),
+                'DB_USER' => '',
+                'DB_PASSWORD' => '',
+                'REDIS_URL' => '',
+            ];
+        }
+        $redis = self::value($body, 'redisUrl');
+        if (!preg_match('#^(?:tcp|tls)://#D', $redis)) {
+            throw new AppError(
+                'INSTALL_INPUT_INVALID',
+                'Redis 地址须以 tcp:// 或 tls:// 开头',
+                422,
+            );
+        }
+        $host = self::value($body, 'dbHost', '/^[a-zA-Z0-9.-]+$/D');
+        $database = self::value($body, 'dbName', '/^[a-zA-Z0-9_]+$/D');
+        $port = filter_var($body['dbPort'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1, 'max_range' => 65535],
+        ]);
+        if ($port === false) {
+            throw new AppError('INSTALL_INPUT_INVALID', 'MySQL 端口无效', 422);
+        }
+        return [
+            'DB_DSN' => "mysql:host=$host;port=$port;dbname=$database;charset=utf8mb4",
+            'DB_USER' => self::value($body, 'dbUser'),
+            'DB_PASSWORD' => self::value($body, 'dbPassword'),
+            'REDIS_URL' => $redis,
+        ];
+    }
+
+    private static function checkRedis(string $redis): void
+    {
+        try {
+            $client = new \Predis\Client($redis, [
+                'parameters' => ['timeout' => 3, 'read_write_timeout' => 3],
+            ]);
+            $key = 'taxilink:install:' . bin2hex(random_bytes(16));
+            if ($client->eval("return redis.call('SET',KEYS[1],'1','EX',5)", 1, $key) != 'OK') {
+                throw new \RuntimeException();
+            }
+        } catch (\Throwable) {
+            throw new AppError(
+                'INSTALL_REDIS_FAILED',
+                'Redis 连接或写入失败，请检查地址、认证和权限',
+                422,
+            );
+        }
     }
 
     private static function callback(Request $request): Response
@@ -232,9 +271,14 @@ final class Install
             );
         }
         $config = $pending['config'];
+        $secure = $config['APP_SECURE_COOKIE'] === '1';
         // Consume PKCE state before exchanging the code, even if Portal rejects it.
         if (!unlink(self::file('pending.json'))) {
-            throw new AppError('INSTALL_STORAGE_FAILED', '无法清除本次授权状态，请检查安装目录权限', 503);
+            throw new AppError(
+                'INSTALL_STORAGE_FAILED',
+                '无法清除本次授权状态，请检查安装目录权限',
+                503,
+            );
         }
         $code = $request->get('code');
         $step = 'portal';
@@ -256,17 +300,8 @@ final class Install
             $config += $keys;
             $step = 'database';
             $pdo = self::database($config);
-            $lock =
-                'taxilink-install:' .
-                substr(
-                    hash('sha256', (string) $pdo->query('SELECT DATABASE()')->fetchColumn()),
-                    0,
-                    40,
-                );
-            $query = $pdo->prepare('SELECT GET_LOCK(?, 0)');
-            $query->execute([$lock]);
-            if ((int) $query->fetchColumn() !== 1) {
-                throw new \RuntimeException();
+            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                self::lockMySql($pdo);
             }
             $claim = self::claim($config);
             if ($claim) {
@@ -297,8 +332,8 @@ final class Install
             self::remove('claim.json');
             return redirect('/install')->withHeaders([
                 'Set-Cookie' => [
-                    self::cookie('', 0),
-                    Auth::cookie('tl_session', $session, 7200, true),
+                    self::cookie('', 0, $secure),
+                    Auth::cookie('tl_session', $session, 7200, $secure),
                 ],
             ]);
         } catch (\Throwable) {
@@ -307,8 +342,20 @@ final class Install
             }
             return redirect('/install?error=' . $step)->withHeader(
                 'Set-Cookie',
-                self::cookie('', 0),
+                self::cookie('', 0, $secure),
             );
+        }
+    }
+
+    private static function lockMySql(\PDO $pdo): void
+    {
+        $lock =
+            'taxilink-install:' .
+            substr(hash('sha256', (string) $pdo->query('SELECT DATABASE()')->fetchColumn()), 0, 40);
+        $query = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+        $query->execute([$lock]);
+        if ((int) $query->fetchColumn() !== 1) {
+            throw new \RuntimeException();
         }
     }
 
@@ -334,13 +381,11 @@ final class Install
 
     private static function requireEmpty(\PDO $pdo): void
     {
-        if (
-            (int) $pdo
-                ->query(
-                    'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()',
-                )
-                ->fetchColumn() !== 0
-        ) {
+        $sql =
+            $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite'
+                ? "SELECT COUNT(*) FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
+                : 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()';
+        if ((int) $pdo->query($sql)->fetchColumn() !== 0) {
             throw new AppError('INSTALL_DB_NOT_EMPTY', '请选择专用于 TAXILink 的空数据库', 422);
         }
     }
@@ -444,27 +489,30 @@ final class Install
         return $value;
     }
 
-    private static function origin(string $value): string
+    private static function origin(string $value, bool $local = false): string
     {
-        if (
-            !filter_var($value, FILTER_VALIDATE_URL) ||
-            !preg_match('#^https://[a-z0-9.-]+(?::[0-9]+)?$#D', $value)
-        ) {
+        $pattern = $local
+            ? '#^http://(?:localhost|127\.0\.0\.1)(?::[0-9]+)?$#D'
+            : '#^https://[a-z0-9.-]+(?::[0-9]+)?$#D';
+        if (!filter_var($value, FILTER_VALIDATE_URL) || !preg_match($pattern, $value)) {
             throw new AppError(
                 'INSTALL_INPUT_INVALID',
-                '站点地址须为 HTTPS 根地址，例如 https://taxi.example.com',
+                $local
+                    ? '测试站点地址仅支持 localhost 或 127.0.0.1 的 HTTP 根地址'
+                    : '站点地址须为 HTTPS 根地址，例如 https://taxi.example.com',
                 422,
             );
         }
         return $value;
     }
 
-    private static function cookie(string $value, int $age): string
+    private static function cookie(string $value, int $age, bool $secure): string
     {
         return self::COOKIE .
             "=$value; Path=" .
             self::CALLBACK .
-            "; HttpOnly; SameSite=Lax; Secure; Max-Age=$age";
+            "; HttpOnly; SameSite=Lax; Max-Age=$age" .
+            ($secure ? '; Secure' : '');
     }
 
     private static function file(string $name): string

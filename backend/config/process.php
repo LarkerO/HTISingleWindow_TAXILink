@@ -21,7 +21,7 @@ global $argv;
 return [
     'webman' => [
         'handler' => Http::class,
-        'listen' => app\domain\Env::get('HTTP_LISTEN','http://127.0.0.1:8787'),
+        'listen' => app\domain\Env::listener('HTTP_LISTEN','http://127.0.0.1:8787'),
         'count' => 4,
         'user' => '',
         'group' => '',
@@ -37,8 +37,8 @@ return [
     ],
     ...(!app\domain\Env::installMode() ? [
     'dispatcher' => ['handler'=>app\process\Dispatcher::class,'count'=>1],
-    'passenger-stream' => ['handler'=>app\process\PassengerStream::class,'listen'=>app\domain\Env::get('STREAM_LISTEN','websocket://127.0.0.1:8790'),'count'=>1],
-    ...(!app\domain\Env::demo() ? ['mod-gateway'=>['handler'=>app\process\ModGateway::class,'listen'=>app\domain\Env::get('MOD_LISTEN','websocket://127.0.0.1:8788'),'count'=>1]] : []),
+    'passenger-stream' => ['handler'=>app\process\PassengerStream::class,'listen'=>app\domain\Env::listener('STREAM_LISTEN','websocket://127.0.0.1:8790'),'count'=>1],
+    ...(!app\domain\Env::demo() ? ['mod-gateway'=>['handler'=>app\process\ModGateway::class,'listen'=>app\domain\Env::listener('MOD_LISTEN','websocket://127.0.0.1:8788'),'count'=>1]] : []),
     ] : []),
     // File update detection and automatic reload
     'monitor' => [

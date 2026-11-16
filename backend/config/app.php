@@ -16,7 +16,7 @@ use support\Request;
 app\domain\Env::boot();
 
 return [
-    'debug' => !app\domain\Env::installMode() && app\domain\Env::get('APP_ENV', 'local') !== 'production',
+    'debug' => !app\domain\Env::installMode() && app\domain\Env::get('APP_ENV', 'local') === 'local',
     'error_reporting' => E_ALL,
     'default_timezone' => 'Asia/Shanghai',
     'request_class' => Request::class,

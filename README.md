@@ -10,7 +10,17 @@
 
 ProComponents 使用 npm 实际发布且支持 Ant Design 6 的 `3.1.15-9` 版本，锁定在 lockfile。管理端遵循 Ant Design Pro 的布局与组件体系，使用 Vite 构建。
 
-## 本地运行
+## 选择运行方式
+
+| 用途 | 数据库与登录 | 入口 |
+| --- | --- | --- |
+| 本地演示 | SQLite、演示账号、模拟模组 | [快速体验](#快速体验) |
+| 本机联调 | SQLite、HydCraft Portal、真实 SM2 模组网关 | [本机测试安装](docs/DEPLOYMENT.md#本机测试安装) |
+| 正式部署 | MySQL、Redis、HTTPS、HydCraft Portal | [生产安装](docs/DEPLOYMENT.md#生产安装) |
+
+Windows PowerShell 生成安装码：在项目根目录安装 Composer 依赖后，运行 `php .\backend\bin\console.php install-code`。使用与启动后端相同的 Windows 账号。安装码适用于未配置的实例；请先在单独目录准备全新实例，再验证浏览器安装流程。
+
+## 快速体验
 
 需要 PHP 8.2+（PDO SQLite/MySQL、curl、mbstring、OpenSSL）、Composer、Node.js 22.12+。连接真实模组还需要 OpenSSL 3 命令行；Linux 需要 pcntl、posix。
 
@@ -64,12 +74,10 @@ npm run test:e2e        # 需先启动后端和两个 Vite 开发服务
 
 浏览器测试截图位于 `artifacts`。接口测试会在本地演示数据库创建并取消测试订单；领域测试完全使用内存数据库。
 
-## 对接与部署
+## 项目文档
 
-正式部署支持从管理端 **`/install`** 开始。准备两个 HTTPS 域名、空 MySQL 库和 Redis，启动后端后，以 systemd 的 `User=` 指定的服务账号生成安装码。向导会验证连接、联调 Portal、校验 SM2 密钥，并将完成授权的账号设为首位平台管理员。页面显示成功后重启后端一次。
+- [部署与权限指南](docs/DEPLOYMENT.md) · 安装模式、PowerShell 命令、Portal 回调、Linux 权限、模组接入与升级。
+- [架构与业务规则](docs/ARCHITECTURE.md) · 调度、订单、结算与多端关系。
+- [接口说明](docs/API.md) · HTTP API 与 WebSocket。
 
-部署前请检查目录权限。服务账号需要能穿过项目路径上的每一级目录，读取 PHP 源码和 Composer 依赖，并写入 `backend/runtime` 和 `backend/installation`。Nginx 的工作进程账号还需要能读取两个前端的 `dist`。仓库位于 `~/` 时，家目录权限也会影响 `sudo -u www-data`。如遇 `chdir(): Permission denied`，按[目录权限排查步骤](docs/DEPLOYMENT.md#服务账号与目录权限)逐级检查。
-
-详见 [架构与业务规则](docs/ARCHITECTURE.md)、[接口说明](docs/API.md)、[真实环境接入](docs/DEPLOYMENT.md)。前端编译产物分别位于 `admin/dist`、`passenger/dist`，由反向代理提供 SPA 回退。
-
-首次安装已用隔离 MariaDB、Redis 和模拟 Portal 验证。正式部署仍需在目标环境验证 Portal 授权、SM2 模组连接和实际 MTR 地图。支付为演示模式。
+测试安装和生产安装均使用真实业务逻辑。支付功能仅供演示。

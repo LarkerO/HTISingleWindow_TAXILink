@@ -1,38 +1,115 @@
-# 真实环境接入
+# TAXILink 部署指南
 
-## 浏览器首次安装
+[本机测试安装](#本机测试安装) · [生产安装](#生产安装) · [Portal 配置](#hydcraft-portal-配置) · [目录权限](#服务账号与目录权限) · [模组接入](#sm2-与模组接入) · [更新与验收](#更新备份与验收)
 
-新服务器可以直接通过管理端 `/install` 安装。先准备两个主机名不同的 HTTPS 站点、一个专用的空 MySQL 数据库、Redis 和 OpenSSL 3。下面以项目目录 `/srv/taxilink` 为例。
+| | 本机测试安装 | 生产安装 |
+| --- | --- | --- |
+| 浏览器入口 | 本机 HTTP，可选端口 | 独立 HTTPS 域名 |
+| 数据库 | 向导创建 SQLite | 预建专用空 MySQL 8 库 |
+| 限流 | SQLite，共享计数 | Redis |
+| 业务 | Portal、企业权限、调度、WebSocket、SM2、演示支付 | 同左 |
 
-1. 克隆平台仓库 `main`，安装依赖并构建两个前端。
+浏览器向导供尚无 `backend/.env`、外部 `DB_DSN` 和安装配置的实例使用。已有数据的站点走升级流程。只想体验界面可使用 README 的[演示模式](../README.md#快速体验)。
+
+## 先准备依赖
+
+需要 PHP 8.2+ CLI、curl、mbstring、对应的 PDO 驱动、Composer、Node.js 22.12+ 和 OpenSSL 3 命令行。Linux 还需要 pcntl 和 posix。以下命令均在项目根目录运行：
+
+```text
+composer install --working-dir=backend --no-dev --optimize-autoloader
+npm ci
+```
+
+OpenSSL 加入 PATH，或通过进程环境变量 `TAXILINK_OPENSSL` 指定可执行文件绝对路径。安装前运行 `php -m` 和 `openssl version` 检查环境。
+
+## 本机测试安装
+
+Windows 和 Linux 均可使用此流程。安装和运行使用同一个普通账号。测试后端和前端仅监听回环地址。管理站与乘客站使用不同主机名隔离 Cookie，例如管理站 `http://localhost:15174`、乘客站 `http://127.0.0.1:15173`。端口可以更换，Portal 回调也要同步更新。
+
+1. 在服务器终端生成安装码并启动后端。安装码有效期 30 分钟，新生成的码会替换旧码。
+
+   Windows PowerShell：
+
+   ```powershell
+   $env:TAXILINK_LOCAL_INSTALL = '1'
+   # OpenSSL 不在 PATH 时，填安装路径
+   # $env:TAXILINK_OPENSSL = 'C:\Program Files\Git\usr\bin\openssl.exe'
+   php .\backend\bin\console.php install-code
+   php .\backend\windows.php
+   ```
+
+   Linux：
 
    ```bash
-   composer install --working-dir=backend --no-dev --optimize-autoloader
-   npm ci
-   npm run build
+   php backend/bin/console.php install-code
+   TAXILINK_LOCAL_INSTALL=1 php backend/start.php start
    ```
 
-2. 按[服务账号与目录权限](#服务账号与目录权限)准备目录后，参照 `deploy/nginx.conf.example` 配置两个站点，再按本文的 systemd 示例启动后端。管理端的 `/install` 由前端接管，`/api/` 和 OAuth 回调由同一主机代理到后端。
-3. 在 Portal 的 `/admin/oauth-clients` 创建 OAuth 客户端，勾选 `profile` 与 `hydroline`，每行登记一个回调。正式登录与安装联调共用管理端回调。
+2. 在另外两个终端启动 Vite。两个前端的 API 代理默认指向 `127.0.0.1:8787`。
 
    ```text
-   https://taxi-admin.example.com/api/auth/callback
-   https://taxi.example.com/api/auth/callback
+   npm run dev -w admin -- --host 127.0.0.1 --port 15174 --strictPort
+   npm run dev -w passenger -- --host 127.0.0.1 --port 15173 --strictPort
    ```
 
-4. 在项目根目录以**后端服务账号**生成安装码，有效期 30 分钟。再次生成会作废上一份安装码及尚未完成的授权。
+3. 在 Portal 创建测试 OAuth 客户端，勾选 `profile` 和 `hydroline`，分别登记两个回调：
+
+   ```text
+   http://localhost:15174/api/auth/callback
+   http://127.0.0.1:15173/api/auth/callback
+   ```
+
+4. 打开 `http://localhost:15174/install`。输入安装码、乘客端地址和 Portal 凭据，使用预定管理员账号完成授权。向导会创建 `backend/installation/taxilink.sqlite`，校验 SM2 并保存配置。
+5. 页面显示安装成功后，停止并重新启动后端，再点“检查服务状态”。本次授权建立的管理员会话可继续使用。启用同一台机器上的真实模组时，参见 [SM2 与模组接入](#sm2-与模组接入)。
+
+## 生产安装
+
+以下按 Linux + Nginx 部署。
+
+1. 将项目部署到 `/srv/taxilink`，为管理端和乘客端分别准备 HTTPS 域名。安装依赖后，在项目根目录运行 `npm run build`，产物位于 `admin/dist` 和 `passenger/dist`。
+2. 在 MySQL 中创建专用空库和账号，替换示例密码：
+
+   ```sql
+   CREATE DATABASE taxilink CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER 'taxilink'@'127.0.0.1' IDENTIFIED BY '替换为独立强密码';
+   GRANT ALL PRIVILEGES ON taxilink.* TO 'taxilink'@'127.0.0.1';
+   ```
+
+   准备 Redis。MySQL 和 Redis 如与后端同机，应仅监听回环地址。
+3. 按[目录权限](#服务账号与目录权限)准备 `backend/runtime` 和 `backend/installation`。以服务账号运行 `php backend/start.php start`，由 systemd 管理前台进程。
+4. 参考 `deploy/nginx.conf.example` 配置两个站点及 TLS。该示例使用 HTTP 监听，可由前置代理终止 TLS。站点根目录分别指向两个 `dist`，保留 SPA 回退和 `/api/` 转发。乘客站还需转发 `/ws` 和 `/taxilink`，保留 WebSocket 升级头与 `X-TAXILink-Proof`。内部 RPC 8789 只供本机调用。
+5. 按 [Portal 配置](#hydcraft-portal-配置)创建 OAuth 客户端。以 systemd 的服务账号生成安装码：
 
    ```bash
    sudo -u www-data php /srv/taxilink/backend/bin/console.php install-code
    ```
 
-5. 打开 `https://taxi-admin.example.com/install`，检查环境，填写安装码、乘客站地址、MySQL 和 Redis 连接、Portal 客户端凭据以及游戏服信息。点击“验证配置并前往 Portal 登录”，确认用预定的管理员账号授权。回调成功后，后端生成并验证两套 SM2 密钥，初始化数据库，将该账号设为首位平台管理员。
-6. 页面显示安装成功后，在服务器执行 `sudo systemctl restart taxilink`。点击页面的“检查服务状态”，服务就绪后进入管理端。本次授权建立的会话可以继续使用。
-7. 在 `backend/installation/sm2-*/` 找到这次安装生成的密钥，将 **`taxilink-mod-private.pem`** 和 **`taxilink-gateway-public.pem`** 安全复制到游戏服务器的 `config/` 目录。按下文配置 `config/taxilink.json`，启用模组，填写游戏服 ID 和 WebSocket 地址，并完成联调。
+6. 从管理端 HTTPS 地址访问 `/install`，填写安装码、站点地址、数据库、Redis 和 Portal 信息，用预定管理员账号完成授权。看到成功提示后执行 `sudo systemctl restart taxilink`，检查服务状态并进入管理端。
 
-向导将配置写入 `backend/installation/config.json`，后端重启时读取该文件。请在升级和备份时保留整个 `backend/installation` 目录，其中包含凭据和私钥。界面不会显示私钥。安装完成后不能再使用安装码认领管理员。已有 `backend/.env`、外部环境变量 `DB_DSN` 或安装配置的实例会被识别为已配置，按原部署方式维护。
+### systemd 示例
 
-如果数据库初始化中途失败，修复数据库权限后，用相同的数据库连接地址、库名和已授权的 Portal 账号重新提交。可在服务器重新签发过期的安装码。
+保存为 `/etc/systemd/system/taxilink.service`，按实际账号和路径调整：
+
+```ini
+[Unit]
+Description=TAXILink backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/srv/taxilink/backend
+ExecStart=/usr/bin/php /srv/taxilink/backend/start.php start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+```
+
+执行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now taxilink`。通过 `sudo journalctl -u taxilink -n 100 --no-pager` 查看日志。
 
 ## 服务账号与目录权限
 
@@ -67,118 +144,28 @@ sudo setfacl -m u:www-data:--x "$HOME"
 
 如果 `namei` 显示项目目录或其他上级目录也有限制，对对应目录同样授予服务账号 `--x`。如果后端代码、Composer 依赖或前端产物无法读取，仅对所需的目录和文件授权，目录需要 `x`，文件需要 `r`。家目录只授予进入权限即可。避免 `chmod -R 777`，并保留配置和私钥的访问限制。权限检查通过后，运行 `sudo -u www-data php "$project/backend/bin/console.php" install-code`。
 
-## 手动部署（Linux + Nginx）
+## HydCraft Portal 配置
 
-以下以项目目录 `/srv/taxilink`、乘客站 `https://taxi.example.com`、管理站 `https://taxi-admin.example.com` 为例。将示例域名全部替换为自己的实际域名；两个域名均解析到部署服务器，并配置有效 HTTPS 证书。当前后端只部署一个实例。
-
-1. 安装 PHP 8.2 或以上的 CLI、Composer、Node.js 22.12 或以上、MySQL 8、Redis、Nginx、OpenSSL 3。PHP 需要 curl、mbstring、PDO 和 pdo_mysql；Linux Workerman 还需要 pcntl、posix，并确保 CLI 未禁用相关函数。后端是常驻 CLI 服务，不通过 PHP-FPM 启动。
-2. 获取平台仓库 main，安装依赖并构建前端：
-
-   ```bash
-   git clone --branch main https://github.com/LarkerO/HTISingleWindow_TAXILink.git /srv/taxilink
-   cd /srv/taxilink
-   composer install --working-dir=backend --no-dev --optimize-autoloader
-   npm ci
-   npm run build
-   cp backend/.env.example backend/.env
-   mkdir -p backend/runtime backend/keys
-   ```
-
-3. 在 MySQL 中创建专用数据库及账号，以下密码必须替换：
-
-   ```sql
-   CREATE DATABASE taxilink CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'taxilink'@'127.0.0.1' IDENTIFIED BY '替换为独立强密码';
-   GRANT ALL PRIVILEGES ON taxilink.* TO 'taxilink'@'127.0.0.1';
-   ```
-
-   Redis 使用本机服务；如果启用了认证，按实际凭据配置 `REDIS_URL`。不要将数据库或 Redis 端口公开到互联网。
-4. 按下文在 Portal 创建 OAuth 客户端，填写 **`backend/.env`**，并准备 SM2 密钥。正式环境必须使用 `DEMO_MODE=0`。首次管理员必须在第一次登录 TAXILink 之前指定。
-5. 初始化数据库：在项目根目录执行 `php backend/bin/console.php migrate`。正式环境不要执行 `seed`，也不要沿用开发演示数据库。
-6. 先在项目根目录执行 `php backend/start.php start` 检查启动输出，再交给 systemd 管理。确保服务账号可读取代码、`.env`、密钥，并可写入 `backend/runtime`。私钥和 `.env` 只允许必要的服务账号读取。
-7. 将 `deploy/nginx.conf.example` 中域名和 `/srv/taxilink` 路径替换为实际值，接入 HTTPS，检查配置后重载 Nginx。该示例只包含 HTTP 监听，需要自行补充 TLS 站点或放到 HTTPS 终止代理后。站点根目录必须分别指向 `passenger/dist`、`admin/dist`，不能指向仓库或 backend 目录。
-8. 配置游戏服模组和 SM2 双向认证，再登录管理端创建企业、邀请管理员、设置车辆中心、车型、虚拟点和运营范围。最后执行本文末尾的上线联调。
-
-systemd 示例（保存为 `/etc/systemd/system/taxilink.service`，服务账号示例为 `www-data`，需与实际文件权限一致）：
-
-```ini
-[Unit]
-Description=TAXILink backend
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/srv/taxilink/backend
-ExecStart=/usr/bin/php /srv/taxilink/backend/start.php start
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=30
-
-[Install]
-WantedBy=multi-user.target
-```
-
-执行 `sudo systemctl daemon-reload`、`sudo systemctl enable --now taxilink`。通过 `sudo journalctl -u taxilink -n 100 --no-pager` 查看日志。修改 `.env` 或更新后端后执行 `sudo systemctl restart taxilink`。使用 systemd 时不要给启动命令加 `-d`。
-
-Windows 本地联调使用 `cd backend` 后执行 `php windows.php`；上述 systemd 步骤仅适用于 Linux。
-
-## HydCraft Portal 后台具体填写
-
-使用有权限的 Portal 管理账号进入 **`/admin/oauth-clients`**，创建 OAuth 客户端。这里配置的是 Portal 对外提供的 OAuth 客户端，不是 Portal 自己用于登录其他平台的第三方登录设置。
-
-| 字段 | 填写值 |
-| --- | --- |
-| 名称 | `TAXILink`，也可用自己的应用名称 |
-| 回调地址 / Redirect URIs | 下方两个完整地址，每行一个 |
-| 权限 / Scopes | 勾选 `profile` 和 `hydroline` |
-| 启用状态 | 保持启用 |
+在 Portal 的 `/admin/oauth-clients` 创建并启用客户端。名称可用 `TAXILink`，权限选 `profile` 和 `hydroline`。一个客户端可供两端共用，回调每行填写一个完整地址。例如：
 
 ```text
-https://taxi.example.com/api/auth/callback
 https://taxi-admin.example.com/api/auth/callback
+https://taxi.example.com/api/auth/callback
 ```
 
-两端共用一个客户端即可。不要用逗号分隔回调地址，不要填首页、通配符或额外的末尾斜杠。协议、域名、端口、路径必须与后端对应配置精确一致。无需 `email` 或 `directory.read`；`profile` 提供用户名、名称、头像，`hydroline` 提供扩展账号资料。OAuth 权限不等于 TAXILink 的管理权限。
+本机测试使用[上面的回调示例](#本机测试安装)。协议、主机名、端口和路径须逐字匹配实际地址。Portal 服务本身使用实际 HTTPS 根地址。保存创建时取得的 Client ID 和 Client Secret，Secret 只保存在后端。
 
-创建成功后保存界面返回的 Client Secret，从客户端列表取得 Client ID，分别填写 `PORTAL_CLIENT_SECRET` 和 `PORTAL_CLIENT_ID`。密钥只放后端 `.env`，不要写进任何 `VITE_*` 变量、前端代码或 Git。`PORTAL_ISSUER` 填实际 Portal 的外部访问根地址（如 `https://hydcraft.cn`），不要追加 `/oauth/authorize` 或 `/api/oauth/token`。
+浏览器安装将完成授权的账号设为首位平台管理员。普通用户以后按 Portal `sub` 关联，平台与企业权限在 TAXILink 内管理。两端各有自己的两小时会话。Portal 停用账号或撤销授权后，下一次 OAuth 登录会在线检查。
 
-代码已固定使用授权码流程、PKCE S256、`client_secret_basic`，无需在前端手动配置这些协议参数。Portal 创建页面当前只要求名称、回调地址和权限。
+- 回调被拒绝时，核对 Portal 登记的 URI 及浏览器地址。
+- `invalid_scope` 时检查是否同时勾选两项权限。
+- 换码失败时检查客户端凭据、Portal 地址、服务器时间和 HTTPS 证书。Windows 的 PHP cURL 如提示证书错误，检查 CLI `php.ini` 的 `curl.cainfo`。
+- 回来仍未登录时检查同源 `/api/` 代理，以及是否使用登记时的主机名和端口。
+- 迁移中断时修复存储权限，使用原数据库和原授权账号重试。安装码过期可重新签发。
 
-### 首个平台管理员
+## 手动配置
 
-`PLATFORM_ADMIN_SUB` 填你的 **Portal 用户 ID（userinfo 的 `sub`，对应 Portal 数据库 User.id）**，不是用户名、邮箱、Hydroline ID、Minecraft UUID，也不是 OAuth Client ID。可让 Portal 管理员从该账号的用户记录确认 ID，或从已授权的 `/api/oauth/userinfo` 响应读取 `sub`；不要通过猜用户名代替。
-
-先填此值并重启后端，再用对应 Portal 账号首次登录 TAXILink 管理端。系统只在首次创建该本地用户时授予平台管理员身份。没有默认管理员密码，Portal 的 OWNER/ADMIN 身份也不会自动转换为 TAXILink 管理员。
-
-如果该账号已在乘客端或管理端登录过 TAXILink，补填此项不会追溯提升权限，需要对已有账号做受控权限修正。不要通过删除已有用户记录解决，以免影响订单和企业关联。
-
-### 本地 OAuth 联调
-
-按仓库默认 `.env.example`，Portal 另建开发客户端，回调地址每行一个：
-
-```text
-http://localhost:8787/api/auth/callback
-http://localhost:5174/api/auth/callback
-```
-
-对应乘客站 `http://localhost:5173`、管理站 `http://localhost:5174`。真实 OAuth 联调需要关闭演示模式并补齐后端所需配置；`DEMO_MODE=1` 的演示登录不能证明 Portal 已接通。Portal 仅允许 HTTPS 或本机回环 HTTP 回调，不要用公网 HTTP 地址。
-
-### 登录验收与常见问题
-
-- 分别打开两端，主动点击登录提示中的按钮，确认跳转到 Portal、授权后回到发起登录的站点。检查用户名、头像以及管理端权限；同一账号在两端的首次登录日期应一致。
-- 回调地址不被接受：检查 Portal 登记值和两个 `PORTAL_*REDIRECT_URI` 的每个字符，包括端口及末尾斜杠。
-- `invalid_scope`：客户端需同时允许 `profile`、`hydroline`。
-- 换码失败：检查 Client ID/Secret 是否来自同一个启用的客户端，以及后端到 Portal 的网络、HTTPS 证书和服务器时间。
-- 登录后仍未登录：检查两个域名的 `/api/` 都代理到后端、实际使用 HTTPS、管理端回调没有误填成乘客域名。Secure Cookie 不会通过普通 HTTP 发送。
-- 能登录但没有管理权限：检查 `PLATFORM_ADMIN_SUB` 是否为正确的 Portal sub，且是否在首次创建本地用户之前配置。
-
-以上依据仓库内核对的 Portal v2 源码，真实部署仍需用自己的客户端凭据完成一次线上授权验收。
-
-## 配置
-
-复制 `backend/.env.example` 至 `backend/.env`，正式环境设置：
+已有 `backend/.env` 的实例继续通过文件配置。全新生产部署如需手动安装，可从 `backend/.env.example` 复制后填写：
 
 ```dotenv
 APP_ENV=production
@@ -204,38 +191,19 @@ TAXILINK_GATEWAY_PRIVATE_KEY=keys/gateway-private.pem
 TAXILINK_MOD_PUBLIC_KEY=keys/mod-public.pem
 ```
 
-数据库使用 utf8mb4。运行 `composer install --no-dev --optimize-autoloader`、`php bin/console.php migrate`，不要在正式环境 seed。首次登录时按 `PLATFORM_ADMIN_SUB` 引导管理员；更换该设置不自动提升已有用户，已有权限应通过受控数据库运维处理。
+运行 `php backend/bin/console.php migrate` 后启动后端。首位管理员按 `PLATFORM_ADMIN_SUB` 在第一次创建本地账号时授权，填写的是 Portal userinfo 的 `sub`。正式实例禁止执行 `seed`。
 
-开发机的 `.reference/hydcraft-portal` 仅用于核对源码，不打包、不提交。核对版本 `497db20`，依据 `docs/SSO_GUIDE.md`、`server/routes/oauth/authorize.get.ts`、`server/utils/oauth-provider/*` 和 OAuth API 实现。Portal 后台创建 OAuth client，允许 `profile hydroline` scope 及精确回调地址。授权码 + PKCE S256，令牌接口支持 client_secret_basic，本项目使用 JSON 请求；userinfo 的 sub 是唯一账号键。Portal 需与上述接口版本相符。
+## SM2 与模组接入
 
-## SM2 与模组
+浏览器向导会自动生成两套密钥并校验双向签名。安全复制 `backend/installation/sm2-*/` 下的 **`taxilink-mod-private.pem`** 和 **`taxilink-gateway-public.pem`** 到游戏服的 `config/`。手动部署可用模组仓库的 `examples/php/init-sm2.ps1` 生成对应文件。私钥保存在服务账号可读的目录。
 
-Portal 客户端必须同时登记乘客端与管理端两个回调地址，分别回到发起登录的站点设置会话 Cookie；不要将管理端回调配置到乘客域名。邀请页与行程页登录后保留本地返回路径。
+在模组的 `config/taxilink.json` 启用连接，填写密钥路径和与安装向导一致的服务器 ID。游戏维度须与后端一致。生产 endpoint 示例为 `wss://taxi.example.com/taxilink`。同机测试可用 `ws://127.0.0.1:8788/taxilink`，并启用模组的 `allowInsecureLocalhost`。
 
-账号复核基于 Portal `v2` 分支 `497db20` 的授权、token 和 userinfo 实现。运行 `npm run test:oauth` 可验证真实 TAXILink 回调控制器与本地 Portal 协议夹具：JSON 换码、Basic 认证、PKCE S256、两端回调、多条 Cookie、state 重放/过期、用户资料更新及并发首次登录。夹具不是线上 Portal，仍需在部署环境填写 Client ID/Secret 并完成实际授权。
+在模组工具中授权单轨专用车厂。管理后台读取 MTR 目录后创建车辆中心、车型和虚拟点映射。
 
-用户身份仅以 Portal `sub` 关联；不要求 Minecraft 绑定，不从 Portal `role` 自动授予平台/企业权限。两端可使用同一 Portal 账号，分别建立应用会话。Portal access/refresh token 不下发浏览器、不保存为长期凭据。本地会话最长两小时；退出只注销当前 TAXILink 会话，不是 Portal 单点登出，Portal 撤销授权或停用账号也不会即时撤销此前的本地会话，下一次 OAuth 登录会重新在线校验。并发登录不会重复创建用户或重置首次登录日期。
+## 更新、备份与验收
 
-升级本次修复前先运行 `php backend/bin/console.php migrate`，新增 OAuth 返回路径与订单版本号，并扩大 MySQL 报价/轨迹 JSON 字段容量。重启后端进程，再发布前端。已由模组回收的 `RECOVERED` 订单可由管理员取消并按失败订单零费用关闭，保留审计与演示退款记录。
-
-复用 TAXILink_MOD 的 `examples/php/init-sm2.ps1` 生成两套独立密钥，或依据其协议用 OpenSSL 3 生成 SM2 密钥。业务后端保存网关私钥和固定的模组公钥；游戏服保存模组私钥和固定的网关公钥，私钥不得进入浏览器或 Git。
-
-模组 endpoint 指向 `wss://taxi.example.com/taxilink`，serverId、dimension 与业务后端一致。使用包含 `pickupDistanceMeters`、`returnDistanceMeters` 以及车辆丢失/生成期乘客保护修复的模组版本；满员、超时及主动确认发车规则保持不变。
-
-在模组现有调试工具中授权单轨专用车厂；业务后台读取 MTR 目录并建立车辆中心、真实车型及虚拟点映射。业务候补采用具体车厂派车，不向模组的多个独立中心同时下单。
-
-## 服务启动及代理
-
-Linux 使用 systemd/supervisor 管理 `php backend/start.php start` 前台进程。所有 worker 默认绑定回环地址。调度文件锁依赖同一 runtime 目录，当前只支持单实例部署。
-
-构建前端 `npm ci && npm run build`。参照 `deploy/nginx.conf.example` 配置两个站点并为正式域名配置 HTTPS；同源代理 `/api` 与 `/ws`，模组使用乘客域名 `/taxilink`。外层 TLS 终止后再转给示例 HTTP 站点亦可。不要对外暴露 8789 内部 RPC，关闭未知代理头透传。代理 WebSocket Upgrade、Connection 与 `X-TAXILink-Proof`。
-
-每日备份 MySQL，保留模组存档中的 TAXILink 状态日志；恢复两端时核对活动订单，禁止清理去重日志后自动重发。Redis 仅存限流数据，丢失不会丢订单。
-
-## 上线前联调
-
-本地已测试模拟模组、SQLite 领域逻辑、HTTP API、浏览器登录提示及打车流程。以下须在目标环境验证：Portal 注册与回调、MySQL/Redis 凭据、SM2 双向签名、真实车厂与轨道、满员/超时自动放行、断线重连、模组重启恢复、有人时取消、实际轨迹计费及演示补退款。
-
-收银台仍显示“演示支付”。未来真实游戏货币需新增经济服务适配与支付对账，当前没有任何真实扣款。
-
-可选跨仓库契约测试的启动方法见模组仓库 `docs/ACCEPTANCE.md`。平台测试入口 `backend/tests/mod-gateway-server.php` 只允许测试环境启动，使用独立数据库与随机回环端口。内部 RPC 默认端口为 8789；若通过 `GATEWAY_RPC_PORT` 修改，须同步修改 `GATEWAY_URL`，仍只监听 127.0.0.1。
+- 浏览器安装配置和私钥位于 `backend/installation`。升级时保留该目录与手动配置文件，备份数据库及模组状态日志。更新后运行 `php backend/bin/console.php migrate`，重启后端并发布两端静态产物。
+- 本地检查运行 `npm test`、`npm run build`。OAuth 协议夹具覆盖 PKCE、回调和并发登录。正式上线仍须用实际 Portal 客户端验收授权。
+- 游戏服联调检查真实车厂与轨道、手动及自动发车、断线重连、模组重启恢复、轨迹计费和演示补退款。恢复备份时先核对活动订单和模组去重日志。
+- 后端采用单实例调度。改动内部 RPC 端口时同步修改 `GATEWAY_RPC_PORT` 和 `GATEWAY_URL`。跨仓库联调细节见模组仓库的 `docs/ACCEPTANCE.md`。
