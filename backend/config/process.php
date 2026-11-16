@@ -35,9 +35,11 @@ return [
             'publicPath' => public_path()
         ]
     ],
+    ...(!app\domain\Env::installMode() ? [
     'dispatcher' => ['handler'=>app\process\Dispatcher::class,'count'=>1],
     'passenger-stream' => ['handler'=>app\process\PassengerStream::class,'listen'=>app\domain\Env::get('STREAM_LISTEN','websocket://127.0.0.1:8790'),'count'=>1],
     ...(!app\domain\Env::demo() ? ['mod-gateway'=>['handler'=>app\process\ModGateway::class,'listen'=>app\domain\Env::get('MOD_LISTEN','websocket://127.0.0.1:8788'),'count'=>1]] : []),
+    ] : []),
     // File update detection and automatic reload
     'monitor' => [
         'handler' => app\process\Monitor::class,
@@ -57,7 +59,7 @@ return [
                 'php', 'html', 'htm', 'env'
             ],
             'options' => [
-                'enable_file_monitor' => !in_array('-d', $argv) && DIRECTORY_SEPARATOR === '/',
+                'enable_file_monitor' => !app\domain\Env::installMode() && !in_array('-d', $argv) && DIRECTORY_SEPARATOR === '/',
                 'enable_memory_monitor' => DIRECTORY_SEPARATOR === '/',
             ]
         ]

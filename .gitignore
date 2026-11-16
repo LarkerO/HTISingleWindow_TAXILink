@@ -4,6 +4,7 @@ node_modules/
 dist/
 vendor/
 runtime/
+backend/installation/
 .env
 .env.*
 !.env.example

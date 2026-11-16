@@ -6,6 +6,24 @@ use PDO;
 final class Db
 {
     private static ?PDO $pdo = null;
+    public static function connect(string $dsn, string $user, string $password, array $options = []): PDO
+    {
+        return new PDO($dsn, $user, $password, $options + [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ]);
+    }
+    public static function withConnection(PDO $connection, callable $action): mixed
+    {
+        $previous = self::$pdo;
+        self::$pdo = $connection;
+        try {
+            return $action();
+        } finally {
+            self::$pdo = $previous;
+        }
+    }
     public static function pdo(): PDO
     {
         Env::boot();
@@ -27,11 +45,7 @@ final class Db
                 throw new \RuntimeException('无法创建 SQLite 数据目录：' . $directory);
             }
         }
-        self::$pdo = new PDO($dsn, Env::get('DB_USER'), Env::get('DB_PASSWORD'), [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
+        self::$pdo = self::connect($dsn, Env::get('DB_USER'), Env::get('DB_PASSWORD'));
         if (self::sqlite()) {
             self::$pdo->exec('PRAGMA foreign_keys=ON');
             self::$pdo->exec('PRAGMA busy_timeout=5000');

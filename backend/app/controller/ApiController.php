@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace app\controller;
-use app\domain\{Admin, AppError, Auth, Booking, Bridge, Db, Dispatch, Env, Http, RateLimit};
+use app\domain\{Admin, AppError, Auth, Booking, Bridge, Db, Dispatch, Env, Install, Portal, RateLimit};
 use support\{Request, Response};
 
 final class ApiController
@@ -9,7 +9,7 @@ final class ApiController
     public function handle(Request $r): Response
     {
         try {
-            $response = $this->route($r);
+            $response = Install::handles($r) ? Install::handle($r) : $this->route($r);
             return ($response instanceof Response ? $response : json($response))->withHeaders([
                 'Cache-Control' => 'no-store',
                 'X-Content-Type-Options' => 'nosniff',
@@ -51,7 +51,7 @@ final class ApiController
             }
             $state = Db::id();
             $destination = $r->get('destination') === 'admin' ? 'admin' : 'passenger';
-            $verifier = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
+            $verifier = Portal::verifier();
             Db::insert('oauth_states', [
                 'id' => hash('sha256', $state),
                 'verifier' => $verifier,
@@ -59,21 +59,10 @@ final class ApiController
                 'return_to' => Auth::returnPath((string) $r->get('returnTo', '/')),
                 'expires' => time() + 600,
             ]);
-            $query = http_build_query([
-                'response_type' => 'code',
-                'client_id' => Env::get('PORTAL_CLIENT_ID'),
-                'redirect_uri' => Auth::oauthRedirect($destination),
-                'scope' => 'profile hydroline',
-                'state' => $state,
-                'code_challenge' => rtrim(
-                    strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'),
-                    '=',
-                ),
-                'code_challenge_method' => 'S256',
-            ]);
-            return redirect(
-                rtrim(Env::get('PORTAL_ISSUER'), '/') . '/oauth/authorize?' . $query,
-            )->withHeader('Set-Cookie', Auth::cookie('tl_oauth', $state, 600));
+            return redirect(Portal::authorize(
+                Env::get('PORTAL_ISSUER'), Env::get('PORTAL_CLIENT_ID'),
+                Auth::oauthRedirect($destination), $state, $verifier,
+            ))->withHeader('Set-Cookie', Auth::cookie('tl_oauth', $state, 600));
         }
         if ($method === 'GET' && $path === '/api/auth/callback') {
             $state = (string) $r->get('state', '');
@@ -97,32 +86,11 @@ final class ApiController
             if (!is_string($code) || $code === '') {
                 throw new AppError('OAUTH_CODE_MISSING', 'Portal 回调缺少授权码，请重新登录', 400);
             }
-            $issuer = rtrim(Env::get('PORTAL_ISSUER'), '/');
-            $token = Http::request(
-                $issuer . '/api/oauth/token',
-                [
-                    'grant_type' => 'authorization_code',
-                    'code' => $code,
-                    'redirect_uri' => Auth::oauthRedirect($entry['destination']),
-                    'code_verifier' => $entry['verifier'],
-                ],
-                [
-                    'Authorization: Basic ' .
-                    base64_encode(
-                        Env::get('PORTAL_CLIENT_ID') . ':' . Env::get('PORTAL_CLIENT_SECRET'),
-                    ),
-                ],
+            $profile = Portal::profile(
+                Env::get('PORTAL_ISSUER'), Env::get('PORTAL_CLIENT_ID'),
+                Env::get('PORTAL_CLIENT_SECRET'), Auth::oauthRedirect($entry['destination']),
+                $code, $entry['verifier'],
             );
-            if (
-                !is_string($token['access_token'] ?? null) ||
-                $token['access_token'] === '' ||
-                strcasecmp((string) ($token['token_type'] ?? ''), 'Bearer') !== 0
-            ) {
-                throw new AppError('OAUTH_TOKEN_INVALID', 'Portal 返回的令牌格式无效', 502);
-            }
-            $profile = Http::request($issuer . '/api/oauth/userinfo', null, [
-                'Authorization: Bearer ' . $token['access_token'],
-            ]);
             $session = Auth::login($profile);
             return redirect(
                 rtrim(

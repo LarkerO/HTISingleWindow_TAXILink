@@ -1,3 +1,4 @@
+import InstallPage from './InstallPage';
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -1129,7 +1130,7 @@ createRoot(document.getElementById('root')!).render(
       }}
     >
       <AntApp>
-        <AdminApp />
+        {location.pathname.replace(/\/$/, '') === '/install' ? <InstallPage /> : <AdminApp />}
       </AntApp>
     </ConfigProvider>
   </React.StrictMode>,

@@ -1,6 +1,40 @@
 # 真实环境接入
 
-## 从零部署顺序（Linux + Nginx）
+## 浏览器首次安装
+
+新服务器可以直接通过管理端 `/install` 安装。先准备两个主机名不同的 HTTPS 站点、一个专用的空 MySQL 数据库、Redis 和 OpenSSL 3。下面以项目目录 `/srv/taxilink` 为例。
+
+1. 克隆平台仓库 `main`，安装依赖并构建两个前端。
+
+   ```bash
+   composer install --working-dir=backend --no-dev --optimize-autoloader
+   npm ci
+   npm run build
+   ```
+
+2. 按 `deploy/nginx.conf.example` 配置两个站点。管理端的 `/install` 由前端接管，`/api/` 和 OAuth 回调由同一主机代理到后端。按本文的 systemd 示例启动后端。服务账号需要能写入 `backend/runtime` 和 `backend/installation`，若部署目录归其他账号管理，请预先创建这两个目录并设置所有者。
+3. 在 Portal 的 `/admin/oauth-clients` 创建 OAuth 客户端，勾选 `profile` 与 `hydroline`，每行登记一个回调。正式登录与安装联调共用管理端回调。
+
+   ```text
+   https://taxi-admin.example.com/api/auth/callback
+   https://taxi.example.com/api/auth/callback
+   ```
+
+4. 在项目根目录以**后端服务账号**生成安装码，有效期 30 分钟。再次生成会作废上一份安装码及尚未完成的授权。
+
+   ```bash
+   sudo -u www-data php backend/bin/console.php install-code
+   ```
+
+5. 打开 `https://taxi-admin.example.com/install`，检查环境，填写安装码、乘客站地址、MySQL 和 Redis 连接、Portal 客户端凭据以及游戏服信息。点击“验证配置并前往 Portal 登录”，确认用预定的管理员账号授权。回调成功后，后端生成并验证两套 SM2 密钥，初始化数据库，将该账号设为首位平台管理员。
+6. 页面显示安装成功后，在服务器执行 `sudo systemctl restart taxilink`。点击页面的“检查服务状态”，服务就绪后进入管理端。本次授权建立的会话可以继续使用。
+7. 在 `backend/installation/sm2-*/` 找到这次安装生成的密钥，将 **`taxilink-mod-private.pem`** 和 **`taxilink-gateway-public.pem`** 安全复制到游戏服务器的 `config/` 目录。按下文配置 `config/taxilink.json`，启用模组，填写游戏服 ID 和 WebSocket 地址，并完成联调。
+
+向导将配置写入 `backend/installation/config.json`，后端重启时读取该文件。请在升级和备份时保留整个 `backend/installation` 目录，其中包含凭据和私钥。界面不会显示私钥。安装完成后不能再使用安装码认领管理员。已有 `backend/.env`、外部环境变量 `DB_DSN` 或安装配置的实例会被识别为已配置，按原部署方式维护。
+
+如果数据库初始化中途失败，修复数据库权限后，用相同的数据库连接地址、库名和已授权的 Portal 账号重新提交。可在服务器重新签发过期的安装码。
+
+## 手动部署（Linux + Nginx）
 
 以下以项目目录 `/srv/taxilink`、乘客站 `https://taxi.example.com`、管理站 `https://taxi-admin.example.com` 为例。将示例域名全部替换为自己的实际域名；两个域名均解析到部署服务器，并配置有效 HTTPS 证书。当前后端只部署一个实例。
 

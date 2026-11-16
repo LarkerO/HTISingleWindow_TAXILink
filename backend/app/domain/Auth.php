@@ -56,12 +56,12 @@ final class Auth
             throw new AppError('ORIGIN_INVALID', '请求来源无效', 403);
         }
     }
-    public static function cookie(string $name, string $value, int $maxAge): string
+    public static function cookie(string $name, string $value, int $maxAge, ?bool $secure = null): string
     {
         return "$name=$value; Path=/; HttpOnly; SameSite=Lax; Max-Age=$maxAge" .
-            (Env::get('APP_SECURE_COOKIE') === '1' ? '; Secure' : '');
+            (($secure ?? (Env::get('APP_SECURE_COOKIE') === '1')) ? '; Secure' : '');
     }
-    public static function login(array $profile): string
+    public static function validateProfile(array $profile): array
     {
         if (
             !is_string($profile['sub'] ?? null) ||
@@ -83,7 +83,13 @@ final class Auth
         ) {
             throw new AppError('PROFILE_INVALID', 'Portal 账号资料格式无效', 502);
         }
-        return Db::tx(function () use ($profile, $username, $avatar): string {
+        return [$username, $avatar];
+    }
+    public static function login(array $profile, ?string $initialAdmin = null): string
+    {
+        [$username, $avatar] = self::validateProfile($profile);
+        $initialAdmin ??= Env::get('PLATFORM_ADMIN_SUB');
+        return Db::tx(function () use ($profile, $username, $avatar, $initialAdmin): string {
             // Atomic create-or-find preserves one identity across simultaneous passenger/admin callbacks.
             $sql =
                 'INSERT INTO users (id,portal_sub,username,avatar,first_login,platform_admin) VALUES (?,?,?,?,?,?)';
@@ -96,8 +102,7 @@ final class Auth
                 $username,
                 $avatar,
                 time(),
-                (int) (Env::get('PLATFORM_ADMIN_SUB') !== '' &&
-                    hash_equals(Env::get('PLATFORM_ADMIN_SUB'), $profile['sub'])),
+                (int) ($initialAdmin !== '' && hash_equals($initialAdmin, $profile['sub'])),
             ]);
             $user = Db::one('SELECT * FROM users WHERE portal_sub=?' . Db::lock(), [
                 $profile['sub'],

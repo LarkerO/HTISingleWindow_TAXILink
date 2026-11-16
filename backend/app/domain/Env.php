@@ -5,12 +5,34 @@ namespace app\domain;
 final class Env
 {
     private static bool $loaded = false;
+    private static bool $installMode;
+    public static function installationDir(): string
+    {
+        return dirname(__DIR__, 2) . '/installation';
+    }
+    public static function configured(): bool
+    {
+        return is_file(self::installationDir() . '/config.json') ||
+            is_file(dirname(__DIR__, 2) . '/.env') || self::get('DB_DSN') !== '';
+    }
+    public static function installMode(): bool
+    {
+        self::boot();
+        return self::$installMode;
+    }
     public static function boot(): void
     {
         if (self::$loaded) {
             return;
         }
         self::$loaded = true;
+        self::$installMode = !self::configured();
+        $installed = self::installationDir() . '/config.json';
+        if (is_file($installed)) {
+            foreach (json_decode(file_get_contents($installed), true, 32, JSON_THROW_ON_ERROR) as $key => $value) {
+                putenv($key . '=' . $value);
+            }
+        }
         $file = dirname(__DIR__, 2) . '/.env';
         foreach (is_file($file) ? file($file, FILE_IGNORE_NEW_LINES) : [] as $line) {
             if (!preg_match('/^([A-Z_][A-Z_0-9]*)=(.*)$/', trim($line), $m)) {
