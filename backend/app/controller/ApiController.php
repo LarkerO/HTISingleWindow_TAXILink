@@ -332,6 +332,19 @@ final class ApiController
             }
             return Bridge::catalog($m[1]);
         }
+        if (
+            in_array($method, ['POST', 'DELETE'], true) &&
+            preg_match('#^/api/admin/depot-authorizations/(-?[0-9]{1,19})$#D', $path, $m)
+        ) {
+            Auth::platform($u);
+            if (Env::demo()) {
+                throw new AppError('DEMO_DEPOT_READ_ONLY', '演示车厂的授权为只读', 409);
+            }
+            $action = $method === 'POST' ? 'add' : 'remove';
+            $result = Bridge::command('taxi.depots.' . $action, ['depotId' => $m[1]]);
+            Admin::audit($u, 'depot.authorization.' . $action, $m[1], []);
+            return $result;
+        }
         if (preg_match('#^/api/admin/companies/([a-z0-9-]+)/(scope|invitations)$#', $path, $m)) {
             Auth::company($u, $m[1]);
             if ($m[2] === 'scope' && $method === 'GET') {

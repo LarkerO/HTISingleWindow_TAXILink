@@ -57,6 +57,7 @@ const menus = [
   { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/orders', name: '订单与调度', icon: <UnorderedListOutlined /> },
   { path: '/companies', name: '运营企业', icon: <ApartmentOutlined /> },
+  { path: '/depot_authorizations', name: '车厂授权', icon: <SafetyCertificateOutlined /> },
   { path: '/centers', name: '车辆中心', icon: <CarOutlined /> },
   { path: '/vehicles', name: '车型管理', icon: <CarOutlined /> },
   { path: '/points', name: '虚拟点与点组', icon: <EnvironmentOutlined /> },
@@ -138,6 +139,7 @@ function AdminApp() {
     [busy, setBusy] = useState(false),
     [drawerOrder, setDrawerOrder] = useState<RecordData | null>(null),
     [orderEvents, setOrderEvents] = useState<RecordData[]>([]);
+  const [depotRows, setDepotRows] = useState<RecordData[]>([]);
   const [systemLogs, setSystemLogs] = useState<RecordData[]>([]);
   const [systemLogError, setSystemLogError] = useState('');
   const [summary, setSummary] = useState({
@@ -180,7 +182,9 @@ function AdminApp() {
     setLoading(true);
     try {
       const r = page.slice(1);
-      if (r === 'system_logs') {
+      if (r === 'depot_authorizations') {
+        setDepotRows(await api('/admin/catalog/depots'));
+      } else if (r === 'system_logs') {
         setSystemLogs(await api('/admin/system_logs'));
         setSystemLogError('');
       } else if (r === 'overview' || r === 'orders') {
@@ -604,7 +608,8 @@ function AdminApp() {
       route={{
         routes: menus.filter(
           (m) =>
-            user.platformAdmin || !['/payments', '/audit_logs', '/system_logs'].includes(m.path),
+            user.platformAdmin ||
+            !['/payments', '/audit_logs', '/system_logs', '/depot_authorizations'].includes(m.path),
         ),
       }}
       menuItemRender={(item, dom) => (
@@ -688,6 +693,80 @@ function AdminApp() {
                 </Button>
               )}
             </Empty>
+          </Card>
+        ) : page === '/depot_authorizations' ? (
+          <Card
+            title="专用车厂授权"
+            extra={
+              <Button loading={loading} onClick={load}>
+                刷新
+              </Button>
+            }
+          >
+            <Typography.Paragraph>
+              仅可授权拥有一条所属停车轨道的专用车厂。授权后可在车辆中心选用。
+              {demo && '演示目录仅供查看。'}
+            </Typography.Paragraph>
+            <Table<RecordData>
+              rowKey="id"
+              dataSource={depotRows}
+              loading={loading}
+              columns={[
+                { title: '车厂', dataIndex: 'name' },
+                { title: '车厂 ID', dataIndex: 'id' },
+                { title: '停车轨道数', dataIndex: 'sidingCount' },
+                {
+                  title: '状态',
+                  dataIndex: 'allowedForTaxi',
+                  render: (allowed: boolean) => (
+                    <Tag color={allowed ? 'green' : undefined}>{allowed ? '已授权' : '未授权'}</Tag>
+                  ),
+                },
+                {
+                  title: '操作',
+                  render: (_, depot) => (
+                    <Button
+                      disabled={
+                        demo ||
+                        busy ||
+                        !user.platformAdmin ||
+                        (!depot.allowedForTaxi && depot.sidingCount !== 1)
+                      }
+                      danger={Boolean(depot.allowedForTaxi)}
+                      onClick={() =>
+                        modal.confirm({
+                          title: depot.allowedForTaxi ? '撤销车厂授权？' : '授权车厂？',
+                          content: depot.allowedForTaxi
+                            ? '撤销后该车厂将不再参与新派车。若车辆中心仍引用它，请同步调整中心配置。'
+                            : depot.name,
+                          onOk: async () => {
+                            setBusy(true);
+                            try {
+                              await api(
+                                '/admin/depot-authorizations/' + encodeURIComponent(depot.id),
+                                undefined,
+                                depot.allowedForTaxi ? 'DELETE' : 'POST',
+                              );
+                              message.success(
+                                depot.allowedForTaxi ? '已撤销车厂授权' : '已授权车厂',
+                              );
+                              await load();
+                            } catch (error) {
+                              fail(error);
+                              throw error;
+                            } finally {
+                              setBusy(false);
+                            }
+                          },
+                        })
+                      }
+                    >
+                      {depot.allowedForTaxi ? '撤销授权' : '授权'}
+                    </Button>
+                  ),
+                },
+              ]}
+            />
           </Card>
         ) : page === '/system_logs' ? (
           systemLogError ? (
@@ -1151,14 +1230,21 @@ function AdminApp() {
               name="depotPairs"
               label="专用车厂及停车轨道"
               rules={[{ required: true }]}
-              extra="每个车厂一条停车轨道，一个中心可包含多个车厂。需先在模组中授权。"
+              extra="每个车厂一条停车轨道，一个中心可包含多个车厂。平台管理员可在「车厂授权」页授权。"
             >
               <Select
                 mode="multiple"
-                options={(catalog.sidings || []).map((s) => ({
-                  value: s.depotId + '|' + s.id,
-                  label: `${catalog.depots?.find((d) => d.id === s.depotId)?.name || s.depotId} / ${s.id}`,
-                }))}
+                options={(catalog.sidings || [])
+                  .filter((s) =>
+                    catalog.depots?.some(
+                      (depot) =>
+                        depot.id === s.depotId && depot.allowedForTaxi && depot.sidingCount === 1,
+                    ),
+                  )
+                  .map((s) => ({
+                    value: s.depotId + '|' + s.id,
+                    label: `${catalog.depots?.find((d) => d.id === s.depotId)?.name || s.depotId} / ${s.id}`,
+                  }))}
               />
             </Form.Item>
           )}
