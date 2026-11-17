@@ -64,6 +64,7 @@ const menus = [
   { path: '/payments', name: '演示支付记录', icon: <SafetyCertificateOutlined /> },
   { path: '/audit_logs', name: '操作日志', icon: <SafetyCertificateOutlined /> },
 ];
+const companyPages = ['/centers', '/vehicles', '/scope', '/fare', '/memberships'];
 const defaultFare = {
   mode: 'fixed',
   payment: 'after',
@@ -133,6 +134,8 @@ function AdminApp() {
     [busy, setBusy] = useState(false),
     [drawerOrder, setDrawerOrder] = useState<RecordData | null>(null),
     [orderEvents, setOrderEvents] = useState<RecordData[]>([]);
+  const [systemLogs, setSystemLogs] = useState<RecordData[]>([]);
+  const [systemLogError, setSystemLogError] = useState('');
   const [summary, setSummary] = useState({
     total: 0,
     active: 0,
@@ -169,11 +172,14 @@ function AdminApp() {
       .catch(fail);
   }, [user]);
   async function load() {
-    if (!user) return;
+    if (!user || (companyPages.includes(page) && !company)) return;
     setLoading(true);
     try {
       const r = page.slice(1);
-      if (r === 'overview' || r === 'orders') {
+      if (r === 'system_logs') {
+        setSystemLogs(await api('/admin/system_logs'));
+        setSystemLogError('');
+      } else if (r === 'overview' || r === 'orders') {
         setRows(await api('/admin/orders' + (company ? '?companyId=' + company : '')));
         setSummary(await api('/admin/summary' + (company ? '?companyId=' + company : '')));
       } else if (r === 'scope') {
@@ -201,7 +207,12 @@ function AdminApp() {
         if (r === 'points') setGroups(await api('/admin/point_groups'));
       }
     } catch (e) {
-      fail(e);
+      if (page === '/system_logs') {
+        setSystemLogs([]);
+        setSystemLogError(e instanceof Error ? e.message : '系统日志读取失败');
+      } else {
+        fail(e);
+      }
     } finally {
       setLoading(false);
     }
@@ -272,7 +283,11 @@ function AdminApp() {
       message.success('已保存');
       setEdit(null);
       if (resource === 'companies') {
-        setCompanies(await api('/admin/companies'));
+        const updated = await api<RecordData[]>('/admin/companies');
+        setCompanies(updated);
+        setCompany((current) =>
+          updated.some((item) => item.id === current) ? current : (updated[0]?.id ?? ''),
+        );
       }
       await load();
     } catch (e) {
@@ -634,88 +649,127 @@ function AdminApp() {
       <PageContainer
         title={menus.find((m) => m.path === page)?.name || '运营总览'}
         subTitle="连接每一次出发，掌握每一段行程。"
-        extra={[
-          <Select
-            key="company"
-            aria-label="当前企业"
-            value={company || undefined}
-            onChange={setCompany}
-            options={companies.map((c) => ({ value: c.id, label: c.name }))}
-            style={{ minWidth: 200 }}
-          />,
-        ]}
+        extra={
+          companies.length > 0 && ['/overview', '/orders', ...companyPages].includes(page)
+            ? [
+                <Select
+                  key="company"
+                  aria-label="当前企业"
+                  placeholder="选择运营企业"
+                  value={company || undefined}
+                  onChange={setCompany}
+                  options={companies.map((c) => ({ value: c.id, label: c.name }))}
+                  style={{ minWidth: 200 }}
+                />,
+              ]
+            : undefined
+        }
       >
-        {page === '/system_logs' ? (
-          <ProTable<RecordData>
-            rowKey="id"
-            headerTitle="WebSocket 系统日志"
-            dataSource={rows}
-            loading={loading}
-            search={false}
-            pagination={{ pageSize: 25 }}
-            toolBarRender={() => [
-              <Button key="refresh" onClick={load}>
-                刷新
-              </Button>,
-            ]}
-            columns={[
-              {
-                title: '时间',
-                dataIndex: 'created_at',
-                render: (_, row) =>
-                  new Date(Number(row.created_at)).toLocaleString('zh-CN', {
-                    fractionalSecondDigits: 3,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  }),
-              },
-              {
-                title: '通道',
-                dataIndex: 'channel',
-                valueEnum: { mod: '模组', passenger: '乘客端' },
-              },
-              {
-                title: '事件',
-                dataIndex: 'event',
-                valueEnum: {
-                  connected: '连接成功',
-                  connection_rejected: '连接拒绝',
-                  disconnected: '断开连接',
-                  message_rejected: '消息拒绝',
-                  command_sent: '指令下发',
-                  command_finished: '指令结束',
-                },
-              },
-              { title: '连接 ID', dataIndex: 'connection_id' },
-              { title: '指令', dataIndex: 'command' },
-              { title: '请求 ID', dataIndex: 'request_id', copyable: true },
-              {
-                title: '总耗时',
-                dataIndex: 'duration_ms',
-                render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
-              },
-              {
-                title: '结果',
-                dataIndex: 'result',
-                valueEnum: {
-                  success: '成功',
-                  mod_error: '模组返回错误',
-                  timeout: '超时',
-                  send_failed: '下发失败',
-                  disconnected: '连接断开',
-                  handshake_invalid: '握手认证失败',
-                  subscription_timeout: '订阅超时',
-                  message_invalid: '消息验证失败',
-                  origin_or_path: '来源或路径不匹配',
-                  session_required: '会话无效',
-                },
-              },
-            ]}
+        {user.platformAdmin && companies.length === 0 && page === '/overview' && (
+          <Alert
+            style={{ marginBottom: 20 }}
+            showIcon
+            type="info"
+            message="尚未创建运营企业"
+            description="先创建企业，再配置车辆中心、车型、运营范围和计费规则。"
+            action={<Button onClick={() => openEditor('companies')}>创建运营企业</Button>}
           />
+        )}
+        {companyPages.includes(page) && !company ? (
+          <Card>
+            <Empty description={companies.length ? '请先选择当前企业' : '请先创建运营企业'}>
+              {user.platformAdmin && companies.length === 0 && (
+                <Button type="primary" onClick={() => openEditor('companies')}>
+                  创建运营企业
+                </Button>
+              )}
+            </Empty>
+          </Card>
+        ) : page === '/system_logs' ? (
+          systemLogError ? (
+            <Alert
+              showIcon
+              type="error"
+              message="无法读取系统日志"
+              description={systemLogError}
+              action={
+                <Button loading={loading} onClick={load}>
+                  重试
+                </Button>
+              }
+            />
+          ) : (
+            <ProTable<RecordData>
+              rowKey="id"
+              headerTitle="WebSocket 系统日志"
+              dataSource={systemLogs}
+              loading={loading}
+              search={false}
+              pagination={{ pageSize: 25 }}
+              toolBarRender={() => [
+                <Button key="refresh" onClick={load}>
+                  刷新
+                </Button>,
+              ]}
+              columns={[
+                {
+                  title: '时间',
+                  dataIndex: 'created_at',
+                  render: (_, row) =>
+                    new Date(Number(row.created_at)).toLocaleString('zh-CN', {
+                      fractionalSecondDigits: 3,
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    }),
+                },
+                {
+                  title: '通道',
+                  dataIndex: 'channel',
+                  valueEnum: { mod: '模组', passenger: '乘客端' },
+                },
+                {
+                  title: '事件',
+                  dataIndex: 'event',
+                  valueEnum: {
+                    connected: '连接成功',
+                    connection_rejected: '连接拒绝',
+                    disconnected: '断开连接',
+                    message_rejected: '消息拒绝',
+                    command_sent: '指令下发',
+                    command_finished: '指令结束',
+                  },
+                },
+                { title: '连接 ID', dataIndex: 'connection_id' },
+                { title: '指令', dataIndex: 'command' },
+                { title: '请求 ID', dataIndex: 'request_id', copyable: true },
+                {
+                  title: '总耗时',
+                  dataIndex: 'duration_ms',
+                  render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
+                },
+                {
+                  title: '结果',
+                  dataIndex: 'result',
+                  valueEnum: {
+                    success: '成功',
+                    mod_error: '模组返回错误',
+                    timeout: '超时',
+                    send_failed: '下发失败',
+                    disconnected: '连接断开',
+                    handshake_invalid: '握手认证失败',
+                    subscription_timeout: '订阅超时',
+                    message_invalid: '消息验证失败',
+                    origin_or_path: '来源或路径不匹配',
+                    session_required: '会话无效',
+                  },
+                },
+              ]}
+            />
+          )
         ) : page === '/overview' ? (
           <>
             <div className="overview-banner">

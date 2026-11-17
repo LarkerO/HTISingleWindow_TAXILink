@@ -44,6 +44,18 @@ final class SystemLog
 
     public static function recent(): array
     {
-        return Db::all('SELECT * FROM system_logs ORDER BY created_at DESC,id DESC LIMIT 1000');
+        try {
+            return Db::all('SELECT * FROM system_logs ORDER BY created_at DESC,id DESC LIMIT 1000');
+        } catch (\PDOException $e) {
+            if ($e->getCode() === '42S02' ||
+                (Db::sqlite() && str_contains($e->getMessage(), 'no such table: system_logs'))) {
+                throw new AppError(
+                    'SYSTEM_LOG_MIGRATION_REQUIRED',
+                    '系统日志表尚未创建。请在当前部署目录运行 php backend/bin/console.php migrate，再重启后端。',
+                    503,
+                );
+            }
+            throw $e;
+        }
     }
 }
