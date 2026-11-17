@@ -28,6 +28,40 @@ function rejects(callable $f, string $key, string $message): void
 Db::migrate();
 Demo::seed();
 $u = Db::one('SELECT * FROM users WHERE id=?', ['demo-user']);
+$mapRequest = static function (string $method, string $path, ?string $token = null, array $input = []) {
+    $raw = "$method $path HTTP/1.1\r\nHost: localhost\r\n";
+    $body = $method === 'POST' ? Db::json($input) : '';
+    if ($token !== null) {
+        $csrf = Db::one('SELECT csrf FROM sessions WHERE id=?', [hash('sha256', $token)])['csrf'];
+        $raw .= "Cookie: tl_session=$token\r\nX-CSRF-Token: $csrf\r\n";
+    }
+    if ($body !== '') {
+        $raw .= "Content-Type: application/json\r\nContent-Length: " . strlen($body) . "\r\n";
+    }
+    return (new \app\controller\ApiController())->handle(new \support\Request($raw . "\r\n" . $body));
+};
+$mapSettings = ['mapId' => 'heishan7_0', 'allow3d' => false];
+$publicMap = '/api/map-settings';
+$adminMap = '/api/admin/map-settings';
+check(
+    Db::data($mapRequest('GET', $publicMap)->rawBody()) === ['mapId' => null, 'allow3d' => true],
+    'BlueMap 公开接口提供默认设置',
+);
+$mapUser = Auth::login(['sub' => 'map-user'], 'map-admin');
+$mapAdmin = Auth::login(['sub' => 'map-admin'], 'map-admin');
+check($mapRequest('POST', $adminMap, $mapUser, $mapSettings)->getStatusCode() === 403, '普通账号不能修改底图');
+check($mapRequest('POST', $adminMap, $mapAdmin, ['mapId' => '../other', 'allow3d' => true])->getStatusCode() === 422, 'BlueMap 拒绝非法地图 ID');
+check(
+    $mapRequest('POST', $adminMap, $mapAdmin, $mapSettings)->getStatusCode() === 200 &&
+        Db::data($mapRequest('GET', $publicMap)->rawBody()) === $mapSettings,
+    '平台管理员保存后两端可读取 BlueMap 设置',
+);
+$mapSettings['allow3d'] = true;
+check(
+    $mapRequest('POST', $adminMap, $mapAdmin, $mapSettings)->getStatusCode() === 200 &&
+        Db::data($mapRequest('GET', $publicMap)->rawBody()) === $mapSettings,
+    'BlueMap 设置支持重复更新',
+);
 $q = Booking::quote($u, ['pickupId' => 'riverside', 'dropoffId' => 'museum', 'passengers' => 2]);
 check(count($q['offers']) === 2, '同一路线可得到两个企业报价');
 check(

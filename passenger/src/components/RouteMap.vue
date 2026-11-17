@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import {
+  blueMap3dUrl,
+  blueMapTiles,
+  loadBlueMap,
+  type BlueMapSettings,
+} from '../../../shared/bluemap';
 import type { Geometry } from '../api';
 const props = defineProps<{
   geometry?: Geometry;
@@ -7,23 +13,27 @@ const props = defineProps<{
   home?: boolean;
   hideVehicle?: boolean;
 }>();
-// The viewport operates on projected world X/Z coordinates; a future tile adapter can share this projection.
 const scale = ref(1),
   pan = ref({ x: 0, y: 0 }),
   pointers = new Map<number, { x: number; y: number }>();
-const source = computed(() =>
-  props.geometry?.points?.length
-    ? props.geometry.points
-    : [
-        [0, 80, 64, 300],
-        [500, 180, 64, 280],
-        [1000, 180, 64, 180],
-        [2000, 280, 64, 180],
-        [3000, 330, 64, 80],
-      ],
-);
+const view3d = ref(false);
+const view3dUrl = ref('');
+const settings = ref<BlueMapSettings>();
+const failed = ref(false);
+const request = new AbortController();
+onMounted(async () => {
+  try {
+    settings.value = await loadBlueMap(request.signal);
+  } catch {
+    if (!request.signal.aborted) failed.value = true;
+  }
+});
+onUnmounted(() => request.abort());
+const source = computed(() => props.geometry?.points ?? []);
 const bounds = computed(() => {
+  const [x, z] = settings.value?.startPos ?? [0, 0];
   const p = source.value;
+  if (!p.length) return { x: x - 300, z: z - 300, w: 600, h: 600 };
   const xs = p.map((v) => v[1]),
     zs = p.map((v) => v[3]);
   return {
@@ -46,14 +56,33 @@ const path = computed(() =>
     })
     .join(' '),
 );
+const tiles = computed(() => {
+  if (!settings.value) return [];
+  const b = bounds.value;
+  const fit = Math.min(300 / b.w, 280 / b.h);
+  const pixelsPerBlock = fit * scale.value;
+  const x = b.x + b.w / 2 - (200 + pan.value.x) / pixelsPerBlock;
+  const z = b.z + b.h / 2 - (210 + pan.value.y) / pixelsPerBlock;
+  return blueMapTiles(
+    settings.value,
+    x,
+    z,
+    400 / pixelsPerBlock,
+    420 / pixelsPerBlock,
+    pixelsPerBlock,
+  );
+});
 const marker = computed(() => {
   const p = props.position;
-  return p ? project(p.x, p.z) : project(source.value[0][1], source.value[0][3]);
+  return p ? project(p.x, p.z) : start.value;
 });
-const start = computed(() => project(source.value[0][1], source.value[0][3]));
+const start = computed(() => {
+  const p = source.value[0];
+  return p ? project(p[1], p[3]) : { x: 200, y: 210 };
+});
 const end = computed(() => {
   const p = source.value.at(-1)!;
-  return project(p[1], p[3]);
+  return p ? project(p[1], p[3]) : start.value;
 });
 function pointer(e: PointerEvent) {
   const box = (e.currentTarget as SVGElement).getBoundingClientRect();
@@ -92,6 +121,18 @@ function move(e: PointerEvent) {
     if (d(old) > 1) zoom(d(now) / d(old), center);
   }
 }
+function toggleView() {
+  if (!view3d.value && settings.value) {
+    const b = bounds.value;
+    view3dUrl.value = blueMap3dUrl(
+      settings.value,
+      b.x + b.w / 2,
+      b.z + b.h / 2,
+      Math.max(b.w, b.h),
+    );
+  }
+  view3d.value = !view3d.value;
+}
 function reset() {
   scale.value = 1;
   pan.value = { x: 0, y: 0 };
@@ -103,7 +144,14 @@ function follow() {
 </script>
 <template>
   <div class="route-map" :class="{ home }">
+    <iframe
+      v-if="view3d && settings"
+      title="BlueMap 3D 地图"
+      :src="view3dUrl"
+      style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0"
+    />
     <svg
+      v-else
       viewBox="0 0 400 420"
       role="img"
       aria-label="行驶轨迹地图，可拖动及双指缩放"
@@ -113,31 +161,20 @@ function follow() {
       @pointercancel="pointers.delete($event.pointerId)"
       @wheel.prevent="zoom($event.deltaY < 0 ? 1.12 : 0.88)"
     >
-      <defs>
-        <pattern id="streets" width="64" height="64" patternUnits="userSpaceOnUse">
-          <rect width="64" height="64" fill="#e8eee7" />
-          <rect x="5" y="5" width="48" height="46" rx="7" fill="#f6f7f0" />
-          <path d="M0 60H64 M60 0V64" stroke="#fff" stroke-width="5" />
-        </pattern>
-      </defs>
-      <rect width="400" height="420" fill="url(#streets)" />
+      <rect width="400" height="420" fill="#e8eee7" />
       <g
         :transform="`translate(${200 + pan.x},${210 + pan.y}) scale(${scale}) translate(-200,-210)`"
       >
-        <path
-          d="M-100 330 C80 260 40 420 240 330 S380 290 500 380"
-          stroke="#b6d5d0"
-          stroke-width="52"
-          fill="none"
+        <image
+          v-for="tile in tiles"
+          :key="tile.url"
+          :href="tile.url"
+          :x="project(tile.x, tile.z).x"
+          :y="project(tile.x, tile.z).y"
+          :width="project(tile.x + tile.width, tile.z).x - project(tile.x, tile.z).x"
+          :height="project(tile.x, tile.z + tile.height).y - project(tile.x, tile.z).y"
+          preserveAspectRatio="none"
         />
-        <path
-          d="M-100 330 C80 260 40 420 240 330 S380 290 500 380"
-          stroke="#c4ded9"
-          stroke-width="40"
-          fill="none"
-        />
-        <rect x="225" y="30" width="100" height="75" rx="22" fill="#cadac0" />
-        <text x="240" y="72" fill="#718267" font-size="11">城市绿地</text>
         <path
           :d="path"
           fill="none"
@@ -154,10 +191,26 @@ function follow() {
           stroke-linejoin="round"
           stroke-linecap="round"
         />
-        <circle :cx="start.x" :cy="start.y" r="7" fill="#236c58" stroke="white" stroke-width="3" />
-        <circle :cx="end.x" :cy="end.y" r="7" fill="#d19c59" stroke="white" stroke-width="3" />
         <circle
-          v-if="!home && !hideVehicle"
+          v-if="source.length"
+          :cx="start.x"
+          :cy="start.y"
+          r="7"
+          fill="#236c58"
+          stroke="white"
+          stroke-width="3"
+        />
+        <circle
+          v-if="source.length"
+          :cx="end.x"
+          :cy="end.y"
+          r="7"
+          fill="#d19c59"
+          stroke="white"
+          stroke-width="3"
+        />
+        <circle
+          v-if="!home && !hideVehicle && position"
           :cx="marker.x"
           :cy="marker.y"
           r="17"
@@ -165,7 +218,7 @@ function follow() {
           opacity=".14"
         />
         <circle
-          v-if="!home && !hideVehicle"
+          v-if="!home && !hideVehicle && position"
           :cx="marker.x"
           :cy="marker.y"
           r="7"
@@ -175,14 +228,26 @@ function follow() {
         />
       </g>
     </svg>
-    <div class="map-caption">
-      {{ geometry ? '轨道行驶轨迹' : '城市轨道 · 示意图' }}<span>双指缩放 · 拖动查看</span>
+    <div v-if="!view3d" class="map-caption">
+      {{ failed ? 'BlueMap 底图暂不可用' : settings ? 'BlueMap' : '正在加载底图'
+      }}<span>双指缩放 · 拖动查看</span>
     </div>
     <div class="map-controls">
-      <button aria-label="放大地图" @click="zoom(1.4)">＋</button
-      ><button aria-label="缩小地图" @click="zoom(0.7)">−</button
-      ><button aria-label="回原点" @click="reset">⌖</button
-      ><button v-if="!home && !hideVehicle" aria-label="定位车辆" @click="follow">◎</button>
+      <button
+        v-if="settings?.allow3d"
+        :aria-label="view3d ? '切换到 2D' : '切换到 3D'"
+        @click="toggleView"
+      >
+        {{ view3d ? '2D' : '3D' }}
+      </button>
+      <template v-if="!view3d">
+        <button aria-label="放大地图" @click="zoom(1.4)">＋</button
+        ><button aria-label="缩小地图" @click="zoom(0.7)">−</button
+        ><button aria-label="回原点" @click="reset">⌖</button
+        ><button v-if="!home && !hideVehicle && position" aria-label="定位车辆" @click="follow">
+          ◎
+        </button>
+      </template>
     </div>
   </div>
 </template>

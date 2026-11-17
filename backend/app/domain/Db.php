@@ -163,6 +163,7 @@ final class Db
                 'id VARCHAR(64) PRIMARY KEY, data TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL',
             'demo_rides' =>
                 'id VARCHAR(64) PRIMARY KEY, params TEXT NOT NULL, created_at BIGINT NOT NULL, departed_at BIGINT, destroyed INTEGER NOT NULL DEFAULT 0',
+            'map_settings' => 'id INTEGER PRIMARY KEY, map_id VARCHAR(128) NOT NULL, allow_3d INTEGER NOT NULL',
             'dispatch_sequence' => 'id INTEGER PRIMARY KEY, ticket BIGINT NOT NULL',
         ];
         if (self::sqlite()) {

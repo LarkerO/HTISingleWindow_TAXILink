@@ -1,3 +1,5 @@
+import { BlueMapSettingsPage } from './BlueMapSettingsPage';
+import { BlueMap } from './BlueMap';
 import InstallPage from './InstallPage';
 import VehicleFields, { defaultCar } from './VehicleFields';
 import React, { useState, useEffect, useRef } from 'react';
@@ -62,6 +64,7 @@ const menus = [
   { path: '/centers', name: '车辆中心', icon: <CarOutlined /> },
   { path: '/vehicles', name: '车型管理', icon: <CarOutlined /> },
   { path: '/points', name: '虚拟点与点组', icon: <EnvironmentOutlined /> },
+  { path: '/bluemap', name: 'BlueMap 设置', icon: <EnvironmentOutlined /> },
   { path: '/scope', name: '运营范围', icon: <EnvironmentOutlined /> },
   { path: '/fare', name: '计费规则', icon: <SettingOutlined /> },
   { path: '/memberships', name: '成员与身份', icon: <TeamOutlined /> },
@@ -189,6 +192,8 @@ function AdminApp() {
         setPoints(p);
         setGroups(g);
         setScope(s.pointIds);
+      } else if (r === 'bluemap') {
+        setRows([]);
       } else if (r === 'fare') {
         const c = companies.find((c) => c.id === company);
         fareForm.setFieldsValue(parse(c?.fare, defaultFare));
@@ -597,7 +602,13 @@ function AdminApp() {
         routes: menus.filter(
           (m) =>
             user.platformAdmin ||
-            !['/payments', '/audit_logs', '/system_logs', '/depot_authorizations'].includes(m.path),
+            ![
+              '/payments',
+              '/audit_logs',
+              '/system_logs',
+              '/depot_authorizations',
+              '/bluemap',
+            ].includes(m.path),
         ),
       }}
       menuItemRender={(item, dom) => (
@@ -695,6 +706,7 @@ function AdminApp() {
               仅可授权拥有一条所属停车轨道的专用车厂。授权后可在车辆中心选用。
               {demo && '演示目录仅供查看。'}
             </Typography.Paragraph>
+            <BlueMap points={depotRows.map(({ id, name, position }) => ({ id, name, position }))} />
             <Table<RecordData>
               rowKey="id"
               dataSource={depotRows}
@@ -965,6 +977,10 @@ function AdminApp() {
               </Col>
             </Row>
           </>
+        ) : page === '/bluemap' ? (
+          user.platformAdmin ? (
+            <BlueMapSettingsPage />
+          ) : null
         ) : page === '/scope' ? (
           <Card title="运营范围白名单" extra={<Tag>上车点与下车点均需在范围内</Tag>}>
             <Alert
@@ -1196,6 +1212,24 @@ function AdminApp() {
               <Form.Item name="description" label="地点说明">
                 <Input />
               </Form.Item>
+              {edit && (
+                <BlueMap
+                  points={(catalog.platforms || []).map((p) => ({
+                    id: p.id,
+                    name: [p.stationName, p.name].filter(Boolean).join(' / '),
+                    position: p.position,
+                  }))}
+                  onSelect={(id) => {
+                    const current: string[] = form.getFieldValue('platformIds') ?? [];
+                    form.setFieldValue(
+                      'platformIds',
+                      current.includes(id)
+                        ? current.filter((value) => value !== id)
+                        : [...current, id],
+                    );
+                  }}
+                />
+              )}
               <Form.Item
                 name="platformIds"
                 label="关联站台轨道（支持多选）"
@@ -1212,6 +1246,31 @@ function AdminApp() {
                 />
               </Form.Item>
             </>
+          )}
+          {resource === 'centers' && edit && (
+            <BlueMap
+              points={(catalog.sidings || []).flatMap((siding) => {
+                const depot = catalog.depots?.find(
+                  (d) => d.id === siding.depotId && d.allowedForTaxi && d.sidingCount === 1,
+                );
+                return depot
+                  ? [
+                      {
+                        id: depot.id + '|' + siding.id,
+                        name: depot.name + ' / ' + siding.name,
+                        position: siding.position,
+                      },
+                    ]
+                  : [];
+              })}
+              onSelect={(id) => {
+                const current: string[] = form.getFieldValue('depotPairs') ?? [];
+                form.setFieldValue(
+                  'depotPairs',
+                  current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+                );
+              }}
+            />
           )}
           {resource === 'centers' && (
             <Form.Item
@@ -1277,6 +1336,20 @@ function AdminApp() {
                 { key: 'state', label: '状态', children: states[drawerOrder.state] },
                 { key: 'amount', label: '金额', children: money(drawerOrder.amountMinor) },
               ]}
+            />
+            <BlueMap
+              route={parse(drawerOrder.telemetry, {})?.geometry?.points}
+              points={
+                parse(drawerOrder.telemetry, {})?.position
+                  ? [
+                      {
+                        id: 'vehicle',
+                        name: '车辆位置',
+                        position: parse(drawerOrder.telemetry, {}).position,
+                      },
+                    ]
+                  : []
+              }
             />
             <Space wrap style={{ margin: '20px 0' }}>
               <Button danger onClick={() => control('emergency')}>

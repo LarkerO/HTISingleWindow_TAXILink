@@ -9,6 +9,7 @@ server {
     server_name taxi.example.com;
     root /srv/taxilink/passenger/dist;
     client_max_body_size 128k;
+    location /bluemap/ { proxy_pass http://127.0.0.1:8100/; proxy_set_header Cookie ""; }
     location /api/ { proxy_pass http://taxilink_api; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
     location = /ws { proxy_pass http://taxilink_stream; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_set_header Host $host; proxy_read_timeout 3600s; }
     location = /taxilink { proxy_pass http://taxilink_mod; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_set_header X-TAXILink-Proof $http_x_taxilink_proof; proxy_read_timeout 120s; }
@@ -19,6 +20,7 @@ server {
     server_name taxi-admin.example.com;
     root /srv/taxilink/admin/dist;
     client_max_body_size 128k;
+    location /bluemap/ { proxy_pass http://127.0.0.1:8100/; proxy_set_header Cookie ""; }
     location /api/ { proxy_pass http://taxilink_api; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; }
     location / { try_files $uri $uri/ /index.html; }
 }

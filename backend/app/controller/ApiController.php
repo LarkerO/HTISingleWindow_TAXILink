@@ -33,6 +33,10 @@ final class ApiController
             Db::one('SELECT 1');
             return ['status' => 'ok', 'demo' => Env::demo(), 'payment' => 'demonstration'];
         }
+        if ($method === 'GET' && $path === '/api/map-settings') {
+            $map = Db::one('SELECT map_id,allow_3d FROM map_settings WHERE id=1');
+            return ['mapId' => $map['map_id'] ?? null, 'allow3d' => (bool) ($map['allow_3d'] ?? true)];
+        }
         if ($method === 'GET' && $path === '/api/points') {
             $q = trim((string) $r->get('q', ''));
             $items = Db::all(
@@ -134,6 +138,19 @@ final class ApiController
             Auth::csrf($r, $u);
         }
         $input = $method === 'GET' ? [] : $r->post();
+        if ($method === 'POST' && $path === '/api/admin/map-settings') {
+            Auth::platform($u);
+            $mapId = $input['mapId'] ?? null;
+            $allow3d = $input['allow3d'] ?? null;
+            if (!is_string($mapId) || !preg_match('/^[a-zA-Z0-9_-]{1,128}$/D', $mapId) || !is_bool($allow3d)) {
+                throw new AppError('VALIDATION', 'BlueMap 地图 ID 或 3D 设置无效', 422);
+            }
+            $upsert = Db::sqlite()
+                ? 'ON CONFLICT(id) DO UPDATE SET map_id=excluded.map_id, allow_3d=excluded.allow_3d'
+                : 'ON DUPLICATE KEY UPDATE map_id=VALUES(map_id), allow_3d=VALUES(allow_3d)';
+            Db::run('INSERT INTO map_settings (id,map_id,allow_3d) VALUES (1,?,?) ' . $upsert, [$mapId, (int) $allow3d]);
+            return ['mapId' => $mapId, 'allow3d' => $allow3d];
+        }
         if (!is_array($input)) {
             throw new AppError('INVALID_BODY', '请求内容无效');
         }

@@ -36,3 +36,8 @@ resource：`companies`、`centers`、`vehicles`、`point_groups`、`points`、`m
 客户端连接同源 `/ws`，反向代理到 8790，携带 Cookie；服务校验 Origin 与会话。每两秒推送 `{type:"orders.snapshot",orders:[...],sampledAt:秒}`，仅包含登录用户自己的最近 30 笔订单，超出部分通过分页 API 查询。支持客户端 `ping` 字符串及 `{type:"pong"}` 响应。连接失效或发送积压关闭，行程页降级为每四秒 HTTP 查询。
 
 所有 MTR ID 必须使用十进制字符串，负数合法，禁止传 JS 数字。金额为整数分；Unix 时间除原始模组遥测/日志外均为秒。
+
+## BlueMap 设置
+
+- `GET /api/map-settings` 返回公开的 `mapId` 和 `allow3d`。初次部署时 `mapId` 为 `null`，前端使用构建默认地图。
+- `POST /api/admin/map-settings` 接受 `mapId` 字符串和 `allow3d` 布尔值。需要平台管理员会话及 CSRF 请求头。

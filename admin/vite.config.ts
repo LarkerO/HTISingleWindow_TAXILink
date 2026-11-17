@@ -18,6 +18,14 @@ export default defineConfig({
     ],
   },
   server: {
-    proxy: { '/api': 'http://127.0.0.1:8787', '/ws': { target: 'ws://127.0.0.1:8790', ws: true } },
+    proxy: {
+      '/bluemap': {
+        target: 'http://127.0.0.1:8100',
+        rewrite: (path) => path.replace(/^\/bluemap/, ''),
+        headers: { cookie: '' },
+      },
+      '/api': 'http://127.0.0.1:8787',
+      '/ws': { target: 'ws://127.0.0.1:8790', ws: true },
+    },
   },
 });

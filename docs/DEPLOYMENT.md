@@ -221,3 +221,14 @@ TAXILINK_MOD_PUBLIC_KEY=keys/mod-public.pem
 - 本地检查运行 `npm test`、`npm run build`。OAuth 协议夹具覆盖 PKCE、回调和并发登录。正式上线仍须用实际 Portal 客户端验收授权。
 - 游戏服联调检查真实车厂与轨道、手动及自动发车、断线重连、模组重启恢复、轨迹计费和演示补退款。恢复备份时先核对活动订单和模组去重日志。
 - 后端采用单实例调度。改动内部 RPC 端口时同步修改 `GATEWAY_RPC_PORT` 和 `GATEWAY_URL`。跨仓库联调细节见模组仓库的 `docs/ACCEPTANCE.md`。
+
+## BlueMap 底图
+
+1. 在游戏服务器启动 BlueMap 并完成目标地图渲染。本文使用 BlueMap 5.7，默认主世界地图 ID 为 `heishan7_0`。BlueMap 根目录的 `settings.json` 中列出了地图 ID。
+2. 开发时，两端 Vite 将 `/bluemap/` 转发到本机 `8100`。生产部署请在两个站点配置 [nginx 示例](../deploy/nginx.conf.example) 的 `/bluemap/` 代理，并将上游地址改为 Web 服务器可访问的 BlueMap 地址。
+3. 已部署的后端升级时运行 `php backend/bin/console.php migrate`，创建保存 BlueMap 设置的表。
+4. 平台管理员打开管理端的 **BlueMap 设置**，填写地图 ID，选择是否向两端开放 3D 并保存。两端在重新打开地图时读取配置，默认以 2D 打开。
+
+2D 从 `/bluemap/maps/<地图 ID>/settings.json` 读取 `lowres.tileSize`、`lodFactor` 和 `lodCount`，按可见范围请求 `tiles/<LOD>/x<索引>/z<索引>.png`。负坐标保留减号，多位索引按数字拆成路径段。图层按 Minecraft X/Z 坐标叠加。初次部署可在构建时设置 `VITE_BLUEMAP_ROOT` 指定后端设置为空时使用的地图目录。
+
+3D 通过同源代理加载 BlueMap 原生视图，并定位到当前地图区域。订单轨迹、实时车辆位置和表单选点保留在 TAXILink 的 2D 视图里。
