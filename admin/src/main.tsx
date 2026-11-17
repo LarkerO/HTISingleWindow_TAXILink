@@ -31,6 +31,8 @@ import {
   Tabs,
   Descriptions,
   Empty,
+  Table,
+  Typography,
 } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import {
@@ -65,6 +67,8 @@ const menus = [
   { path: '/audit_logs', name: '操作日志', icon: <SafetyCertificateOutlined /> },
 ];
 const companyPages = ['/centers', '/vehicles', '/scope', '/fare', '/memberships'];
+const logLabel = (labels: Record<string, string>) => (value: string | null) =>
+  value ? (labels[value] ?? value) : '—';
 const defaultFare = {
   mode: 'fixed',
   payment: 'after',
@@ -699,76 +703,84 @@ function AdminApp() {
               }
             />
           ) : (
-            <ProTable<RecordData>
-              rowKey="id"
-              headerTitle="WebSocket 系统日志"
-              dataSource={systemLogs}
-              loading={loading}
-              search={false}
-              pagination={{ pageSize: 25 }}
-              toolBarRender={() => [
-                <Button key="refresh" onClick={load}>
+            <Card
+              title="WebSocket 系统日志"
+              extra={
+                <Button loading={loading} onClick={load}>
                   刷新
-                </Button>,
-              ]}
-              columns={[
-                {
-                  title: '时间',
-                  dataIndex: 'created_at',
-                  render: (_, row) =>
-                    new Date(Number(row.created_at)).toLocaleString('zh-CN', {
-                      fractionalSecondDigits: 3,
-                      year: 'numeric',
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
+                </Button>
+              }
+            >
+              <Table<RecordData>
+                rowKey="id"
+                dataSource={systemLogs}
+                loading={loading}
+                pagination={{ pageSize: 25 }}
+                scroll={{ x: 960 }}
+                columns={[
+                  {
+                    title: '时间',
+                    dataIndex: 'created_at',
+                    render: (_, row) =>
+                      new Date(Number(row.created_at)).toLocaleString('zh-CN', {
+                        fractionalSecondDigits: 3,
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                      }),
+                  },
+                  {
+                    title: '通道',
+                    dataIndex: 'channel',
+                    render: logLabel({ mod: '模组', passenger: '乘客端' }),
+                  },
+                  {
+                    title: '事件',
+                    dataIndex: 'event',
+                    render: logLabel({
+                      connected: '连接成功',
+                      connection_rejected: '连接拒绝',
+                      disconnected: '断开连接',
+                      message_rejected: '消息拒绝',
+                      command_sent: '指令下发',
+                      command_finished: '指令结束',
                     }),
-                },
-                {
-                  title: '通道',
-                  dataIndex: 'channel',
-                  valueEnum: { mod: '模组', passenger: '乘客端' },
-                },
-                {
-                  title: '事件',
-                  dataIndex: 'event',
-                  valueEnum: {
-                    connected: '连接成功',
-                    connection_rejected: '连接拒绝',
-                    disconnected: '断开连接',
-                    message_rejected: '消息拒绝',
-                    command_sent: '指令下发',
-                    command_finished: '指令结束',
                   },
-                },
-                { title: '连接 ID', dataIndex: 'connection_id' },
-                { title: '指令', dataIndex: 'command' },
-                { title: '请求 ID', dataIndex: 'request_id', copyable: true },
-                {
-                  title: '总耗时',
-                  dataIndex: 'duration_ms',
-                  render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
-                },
-                {
-                  title: '结果',
-                  dataIndex: 'result',
-                  valueEnum: {
-                    success: '成功',
-                    mod_error: '模组返回错误',
-                    timeout: '超时',
-                    send_failed: '下发失败',
-                    disconnected: '连接断开',
-                    handshake_invalid: '握手认证失败',
-                    subscription_timeout: '订阅超时',
-                    message_invalid: '消息验证失败',
-                    origin_or_path: '来源或路径不匹配',
-                    session_required: '会话无效',
+                  { title: '连接 ID', dataIndex: 'connection_id' },
+                  { title: '指令', dataIndex: 'command' },
+                  {
+                    title: '请求 ID',
+                    dataIndex: 'request_id',
+                    render: (value: string | null) =>
+                      value ? <Typography.Text copyable>{value}</Typography.Text> : '—',
                   },
-                },
-              ]}
-            />
+                  {
+                    title: '总耗时',
+                    dataIndex: 'duration_ms',
+                    render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
+                  },
+                  {
+                    title: '结果',
+                    dataIndex: 'result',
+                    render: logLabel({
+                      success: '成功',
+                      mod_error: '模组返回错误',
+                      timeout: '超时',
+                      send_failed: '下发失败',
+                      disconnected: '连接断开',
+                      handshake_invalid: '握手认证失败',
+                      subscription_timeout: '订阅超时',
+                      message_invalid: '消息验证失败',
+                      origin_or_path: '来源或路径不匹配',
+                      session_required: '会话无效',
+                    }),
+                  },
+                ]}
+              />
+            </Card>
           )
         ) : page === '/overview' ? (
           <>

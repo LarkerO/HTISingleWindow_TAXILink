@@ -54,6 +54,8 @@ Windows 和 Linux 均可使用此流程。安装和运行使用同一个普通�
    npm run dev -w passenger -- --host 127.0.0.1 --port 15173 --strictPort
    ```
 
+   如果开发页面提示 `Failed to fetch dynamically imported module`，且地址包含 `/node_modules/.vite/deps/`，先停止旧的管理端 Vite 进程，在管理端启动命令末尾加 `--force`，然后在浏览器用 Ctrl+F5 重新加载。开发服务使用自己的依赖缓存，`npm run build` 生成的 `admin/dist` 供静态部署使用。
+
 3. 在 Portal 创建测试 OAuth 客户端，勾选 `profile` 和 `hydroline`，分别登记两个回调：
 
    ```text
