@@ -25,7 +25,7 @@ final class Dispatch
         }
         foreach (
             Db::all(
-                "SELECT * FROM orders WHERE state IN ('DISPATCHING','ACTIVE','CANCEL_REQUESTED','NEEDS_ATTENTION','FINALIZING') ORDER BY created_at LIMIT 100",
+                "SELECT * FROM orders WHERE state IN ('DISPATCHING','ACTIVE','CANCEL_REQUESTED','NEEDS_ATTENTION','FINALIZING') OR vehicle_pending=1 ORDER BY vehicle_pending,created_at LIMIT 100",
             )
             as $o
         ) {
@@ -59,7 +59,7 @@ final class Dispatch
                         if ($e->key !== 'VEHICLE_NOT_READY') {
                             throw $e;
                         }
-                        if (($status['phase'] ?? '') === 'COMPLETED') {
+                        if (($status['phase'] ?? '') === 'COMPLETED' && !$o['vehicle_pending']) {
                             throw new AppError(
                                 'FINAL_GEOMETRY_PENDING',
                                 '等待最终行程轨迹核对',
@@ -93,6 +93,10 @@ final class Dispatch
                     }
                 }
             } catch (AppError $e) {
+                if ($e->key === 'ORDER_NOT_FOUND' && $o['vehicle_pending']) {
+                    self::ingest($o['id'], 'reconcile.vehicle_missing', ['phase' => 'MISSING'], time() * 1000);
+                    continue;
+                }
                 if ($e->key === 'ORDER_NOT_FOUND' && $o['state'] === 'CANCEL_REQUESTED') {
                     self::finish($o, 'CANCELLED', 'cancel.not_dispatched', 0);
                     continue;
@@ -260,12 +264,25 @@ final class Dispatch
                 'wire:' . hash('sha256', $id . $type . $timestamp . Db::json($data)),
             );
         }
-        if (in_array($o['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
-            return;
-        }
         $telemetry = Db::data($o['telemetry']);
         $snapshotAt = max($timestamp, (int) ($data['sampledAt'] ?? 0));
         $fresh = $sequence === null && $snapshotAt >= ($telemetry['_snapshotAt'] ?? 0);
+        if (in_array($o['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
+            if ($o['vehicle_pending'] && $fresh) {
+                $telemetry = array_replace($telemetry, $data, ['_snapshotAt' => $snapshotAt]);
+                $vehicleDone = $type === 'reconcile.vehicle_missing' ||
+                    ($type === 'reconcile.final' && in_array(
+                        $data['phase'] ?? '',
+                        ['COMPLETED', 'DESTROYED', 'CANCELLED', 'FAILED', 'RECOVERED'],
+                        true,
+                    ));
+                Db::run(
+                    'UPDATE orders SET revision=revision+1,telemetry=?,vehicle_pending=? WHERE id=?',
+                    [Db::json($telemetry), (int) !$vehicleDone, $id],
+                );
+            }
+            return;
+        }
         if ($fresh) {
             $telemetry = array_replace($telemetry, $data);
             $telemetry['_snapshotAt'] = $snapshotAt;
@@ -296,13 +313,23 @@ final class Dispatch
             $state = 'ACTIVE';
         }
         $phase = $fresh ? $data['phase'] ?? '' : '';
+        $passengerDone = $type === 'reconcile.final' &&
+            $phase === 'ACTIVE' &&
+            ($data['onboardCount'] ?? null) === 0 &&
+            ($start !== null || ($data['stage'] ?? '') === 'RETURNING') &&
+            (($data['stage'] ?? '') === 'RETURNING' ||
+                (($data['stage'] ?? '') === 'WAITING_DROPOFF' && ($telemetry['_everOnboard'] ?? false)));
         if ($phase !== '' && $o['candidate_id']) {
             Db::run(
                 "UPDATE candidates SET state=CASE WHEN id=? THEN 'SELECTED' ELSE 'CANCELLED' END WHERE order_id=? AND state='WAITING'",
                 [$o['candidate_id'], $id],
             );
         }
-        if ($phase === 'COMPLETED') {
+        if ($passengerDone) {
+            $state = 'COMPLETED';
+            $end ??= $at;
+            Booking::event($id, 'passenger.trip_completed', []);
+        } elseif ($phase === 'COMPLETED') {
             $state = $type === 'reconcile.final' ? 'COMPLETED' : 'FINALIZING';
             $end ??= $at;
         } elseif ($phase === 'DESTROYED' || $phase === 'CANCELLED') {
@@ -327,13 +354,16 @@ final class Dispatch
             }
             if ($start !== null && $rules['mode'] === 'metered') {
                 $geo = $telemetry['geometry'] ?? [];
-                $distance = 0;
+                $distance = $passengerDone ? $offer['route']['distanceMeters'] : 0;
                 foreach ($geo['legs'] ?? [] as $leg) {
                     if ($leg['stage'] === 'ON_TRIP') {
                         $distance = min(
                             max(0, ($geo['progressMeters'] ?? 0) - $leg['startMeters']),
                             $leg['endMeters'] - $leg['startMeters'],
                         );
+                        if ($passengerDone) {
+                            $distance = max(0, $leg['endMeters'] - $leg['startMeters']);
+                        }
                     }
                 }
                 $pickup = $offer['route']['pickupDistanceMeters'];
@@ -372,8 +402,8 @@ final class Dispatch
             }
         }
         Db::run(
-            'UPDATE orders SET revision=revision+1,state=?,telemetry=?,billing_started=?,billing_ended=?,amount=?,updated_at=? WHERE id=?',
-            [$state, Db::json($telemetry), $start, $end, $amount, time(), $id],
+            'UPDATE orders SET revision=revision+1,state=?,telemetry=?,billing_started=?,billing_ended=?,amount=?,updated_at=?,vehicle_pending=? WHERE id=?',
+            [$state, Db::json($telemetry), $start, $end, $amount, time(), (int) $passengerDone, $id],
         );
         if (in_array($state, ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
             Db::run(

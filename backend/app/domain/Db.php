@@ -230,6 +230,9 @@ final class Db
         if (!in_array('revision', $columns, true)) {
             self::pdo()->exec('ALTER TABLE orders ADD COLUMN revision BIGINT NOT NULL DEFAULT 0');
         }
+        if (!in_array('vehicle_pending', $columns, true)) {
+            self::pdo()->exec('ALTER TABLE orders ADD COLUMN vehicle_pending INTEGER NOT NULL DEFAULT 0');
+        }
         if (!self::one('SELECT id FROM dispatch_sequence WHERE id=1')) {
             self::insert('dispatch_sequence', ['id' => 1, 'ticket' => 0]);
         }

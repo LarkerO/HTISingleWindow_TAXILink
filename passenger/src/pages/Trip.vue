@@ -103,7 +103,11 @@ const eta = computed(() => {
       >{{ connected ? '实时同步' : '定时同步' }}</span
     >
   </section>
-  <RouteMap :geometry="order?.telemetry.geometry" :position="order?.telemetry.position" />
+  <RouteMap
+    :geometry="order?.telemetry.geometry"
+    :position="order?.telemetry.position"
+    :hide-vehicle="!!terminal || !order?.telemetry.position"
+  />
   <section v-if="order" class="trip-panel surface">
     <div class="section-kicker"><span class="live-dot"></span>{{ title }}</div>
     <h1>
@@ -128,9 +132,9 @@ const eta = computed(() => {
         <small>{{ terminal ? '本次费用' : '当前金额' }}</small
         ><strong>{{ money(order.amountMinor) }}<em>游戏币</em></strong>
       </div>
-      <div>
+      <div v-if="!terminal">
         <small>{{ order.telemetry.stage === 'TO_PICKUP' ? '预计接客' : '预计抵达' }}</small
-        ><strong>{{ terminal ? '已结束' : eta }}</strong>
+        ><strong>{{ eta }}</strong>
       </div>
     </div>
     <div class="order-route">
@@ -165,7 +169,11 @@ const eta = computed(() => {
         @click="router.push('/checkout/' + order.id)"
         >前往收银台</t-button
       ><t-button
-        v-if="!terminal && order.state !== 'CANCEL_REQUESTED'"
+        v-if="
+          !terminal &&
+          !['CANCEL_REQUESTED', 'FINALIZING'].includes(order.state) &&
+          order.telemetry.stage !== 'WAITING_DROPOFF'
+        "
         block
         variant="outline"
         :disabled="busy"
@@ -174,8 +182,10 @@ const eta = computed(() => {
       >
     </div>
     <p class="booking-note">
-      支付仅演示 · {{ order.billingStarted ? '已开始计费' : '实际放行后开始计费' }} ·
-      满员或超时也可能自动发车
+      支付仅演示<span v-if="!terminal">
+        · {{ order.billingStarted ? '已开始计费' : '实际放行后开始计费' }} ·
+        满员或超时也可能自动发车</span
+      >
     </p>
   </section>
   <div v-if="confirmCancel" class="modal-backdrop">

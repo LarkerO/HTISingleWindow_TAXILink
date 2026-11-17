@@ -32,7 +32,7 @@ final class PassengerStream
                 $connection->send(
                     Db::json([
                         'type' => 'orders.snapshot',
-                        'orders' => array_map(Booking::view(...), $orders),
+                        'orders' => array_map(Booking::passengerView(...), $orders),
                         'sampledAt' => time(),
                     ]),
                 );

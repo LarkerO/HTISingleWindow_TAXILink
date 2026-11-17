@@ -5,6 +5,7 @@ const props = defineProps<{
   geometry?: Geometry;
   position?: { x: number; z: number };
   home?: boolean;
+  hideVehicle?: boolean;
 }>();
 // The viewport operates on projected world X/Z coordinates; a future tile adapter can share this projection.
 const scale = ref(1),
@@ -155,9 +156,16 @@ function follow() {
         />
         <circle :cx="start.x" :cy="start.y" r="7" fill="#236c58" stroke="white" stroke-width="3" />
         <circle :cx="end.x" :cy="end.y" r="7" fill="#d19c59" stroke="white" stroke-width="3" />
-        <circle v-if="!home" :cx="marker.x" :cy="marker.y" r="17" fill="#236c58" opacity=".14" />
         <circle
-          v-if="!home"
+          v-if="!home && !hideVehicle"
+          :cx="marker.x"
+          :cy="marker.y"
+          r="17"
+          fill="#236c58"
+          opacity=".14"
+        />
+        <circle
+          v-if="!home && !hideVehicle"
           :cx="marker.x"
           :cy="marker.y"
           r="7"
@@ -174,7 +182,7 @@ function follow() {
       <button aria-label="放大地图" @click="zoom(1.4)">＋</button
       ><button aria-label="缩小地图" @click="zoom(0.7)">−</button
       ><button aria-label="回原点" @click="reset">⌖</button
-      ><button v-if="!home" aria-label="定位车辆" @click="follow">◎</button>
+      ><button v-if="!home && !hideVehicle" aria-label="定位车辆" @click="follow">◎</button>
     </div>
   </div>
 </template>

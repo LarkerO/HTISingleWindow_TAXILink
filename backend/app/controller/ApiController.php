@@ -158,7 +158,7 @@ final class ApiController
                 $offset = ($page - 1) * 30;
                 return [
                     'items' => array_map(
-                        Booking::view(...),
+                        Booking::passengerView(...),
                         Db::all(
                             "SELECT * FROM orders WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT 30 OFFSET $offset",
                             [$u['id']],
@@ -190,7 +190,7 @@ final class ApiController
                         ),
                     ];
                 }
-                return Booking::view($o);
+                return Booking::passengerView($o);
             }
             if ($method === 'POST' && $action === 'pay') {
                 return Booking::pay($u, $id);
@@ -219,7 +219,7 @@ final class ApiController
                         Booking::event($id, 'passenger.cancel_requested');
                     }
                 });
-                return Booking::view(Db::one('SELECT * FROM orders WHERE id=?', [$id]));
+                return Booking::passengerView(Db::one('SELECT * FROM orders WHERE id=?', [$id]));
             }
         }
         if ($method === 'POST' && $path === '/api/invitations/accept') {

@@ -347,4 +347,48 @@ check(
     $closed['state'] === 'FAILED' && (int) $closed['paid'] === 0 && (int) $closed['amount'] === 0,
     '重启回收订单关闭后停止重试并生成演示退款',
 );
+$earlyId = Db::id();
+Db::insert('orders', array_replace($settled, [
+    'id' => $earlyId, 'idempotency_key' => 'early-settlement-fixture', 'state' => 'ACTIVE',
+    'telemetry' => '{}', 'billing_started' => $started, 'billing_ended' => null, 'paid' => 20000,
+]));
+Dispatch::ingest($earlyId, 'passenger.boarded', [], $started * 1000, 'early-boarded');
+$dropoff = [
+    'phase' => 'ACTIVE', 'stage' => 'WAITING_DROPOFF', 'onboardCount' => 1,
+    'position' => ['x' => 5, 'z' => 0],
+    'geometry' => [
+        'progressMeters' => 50, 'totalMeters' => 80,
+        'legs' => [
+            ['stage' => 'ON_TRIP', 'startMeters' => 10, 'endMeters' => 50],
+            ['stage' => 'RETURNING', 'startMeters' => 50, 'endMeters' => 80],
+        ],
+        'points' => [[0, 0, 64, 0], [40, 4, 64, 0], [60, 6, 64, 0], [80, 8, 64, 0]],
+    ],
+];
+$arrival = ($started + 60) * 1000;
+Dispatch::ingest($earlyId, 'reconcile.final', $dropoff, $arrival);
+check(Db::one('SELECT state FROM orders WHERE id=?', [$earlyId])['state'] === 'ACTIVE', '抵达时仍有人则继续等待下车');
+$dropoff['onboardCount'] = 0;
+Dispatch::ingest($earlyId, 'reconcile.final', $dropoff, $arrival + 1000);
+$early = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
+check($early['state'] === 'COMPLETED' && (int) $early['vehicle_pending'] === 1, '全部下车后立即结束乘客订单并继续跟踪车辆');
+check((int) $early['billing_ended'] === $started + 60 && (int) $early['paid'] === (int) $early['amount'], '下车时按抵达时间结算并退款');
+$returning = array_replace($dropoff, ['stage' => 'RETURNING', 'stageLabel' => '回库中']);
+Dispatch::ingest($earlyId, 'taxi.telemetry', $returning, $arrival + 2000);
+$during = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
+$passenger = Booking::passengerView($during)['telemetry'];
+check(
+    Booking::view($during)['telemetry']['stage'] === 'RETURNING' &&
+    $passenger['stage'] === 'COMPLETED' && !isset($passenger['position']) &&
+    count($passenger['geometry']['legs']) === 1 && end($passenger['geometry']['points'])[0] === 50,
+    '运营端可见回库，乘客地图在下车点截断并隐藏车辆',
+);
+Dispatch::ingest($earlyId, 'reconcile.final', ['phase' => 'FAILED', 'stage' => 'FAILED'], $arrival + 3000);
+$after = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
+check(
+    $after['state'] === 'COMPLETED' && (int) $after['vehicle_pending'] === 0 &&
+    $after['amount'] === $early['amount'] && $after['paid'] === $early['paid'] &&
+    count(Db::all('SELECT id FROM payments WHERE order_id=?', [$earlyId])) === 1,
+    '回库失败只结束车辆跟踪，已结算订单和退款保持不变',
+);
 echo "\n$checks 项领域验证通过\n";

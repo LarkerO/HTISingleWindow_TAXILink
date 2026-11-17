@@ -195,7 +195,7 @@ final class Booking
             if ($existing['request_hash'] !== $fingerprint) {
                 throw new AppError('ORDER_CONFLICT', '请求标识已用于其他参数', 409);
             }
-            return self::view($existing);
+            return self::passengerView($existing);
         }
         $q = Db::one('SELECT * FROM quotes WHERE id=? AND user_id=?', [
             $input['quoteId'] ?? '',
@@ -229,7 +229,7 @@ final class Booking
                 if ($existing['request_hash'] !== $fingerprint) {
                     throw new AppError('ORDER_CONFLICT', '请求标识已用于其他参数', 409);
                 }
-                return self::view($existing);
+                return self::passengerView($existing);
             }
             $ticket = (int) Db::one('SELECT ticket FROM dispatch_sequence WHERE id=1')['ticket'];
             $snapshot = [
@@ -278,9 +278,66 @@ final class Booking
                 ]);
             }
             self::event($id, 'order.created', ['demonstration' => true]);
-            return self::view($order);
+            return self::passengerView($order);
         });
     }
+    public static function passengerView(array $o): array
+    {
+        $view = self::view($o);
+        $t = $view['telemetry'];
+        $stage = $t['stage'] ?? '';
+        if ($view['state'] === 'COMPLETED') {
+            $t['phase'] = 'COMPLETED';
+        }
+        if ($view['state'] === 'COMPLETED' || in_array($stage, ['RETURNING', 'AWAITING_DISEMBARK'], true)) {
+            unset($t['position'], $t['speedKmh'], $t['etaDropoffSeconds'], $t['etaPickupSeconds']);
+            $t['stage'] = $view['state'] === 'COMPLETED' ? 'COMPLETED' : 'WAITING_DROPOFF';
+            $t['stageLabel'] = $view['state'] === 'COMPLETED' ? '已完成' : '等待下车';
+        }
+        if (isset($t['geometry'])) {
+            $t['geometry'] = self::passengerGeometry($t['geometry']);
+        }
+        $view['telemetry'] = $t;
+        return $view;
+    }
+
+    private static function passengerGeometry(array $geometry): array
+    {
+        $geometry['legs'] = array_values(array_filter(
+            $geometry['legs'] ?? [],
+            static fn(array $leg): bool => $leg['stage'] !== 'RETURNING',
+        ));
+        foreach ($geometry['legs'] as $leg) {
+            if ($leg['stage'] !== 'ON_TRIP') {
+                continue;
+            }
+            $end = $leg['endMeters'];
+            $geometry['totalMeters'] = $end;
+            $geometry['progressMeters'] = min($end, $geometry['progressMeters'] ?? 0);
+            $points = [];
+            foreach ($geometry['points'] ?? [] as $point) {
+                if ($point[0] <= $end) {
+                    $points[] = $point;
+                    continue;
+                }
+                $previous = end($points);
+                if ($previous && $previous[0] < $end) {
+                    $ratio = ($end - $previous[0]) / ($point[0] - $previous[0]);
+                    $points[] = [$end,
+                        $previous[1] + ($point[1] - $previous[1]) * $ratio,
+                        $previous[2] + ($point[2] - $previous[2]) * $ratio,
+                        $previous[3] + ($point[3] - $previous[3]) * $ratio,
+                        null, null,
+                    ];
+                }
+                break;
+            }
+            $geometry['points'] = $points;
+            break;
+        }
+        return $geometry;
+    }
+
     public static function view(array $o): array
     {
         $snapshot = Db::data($o['snapshot']);
@@ -359,7 +416,7 @@ final class Booking
                 ],
             );
             self::event($id, 'payment.demonstrated', ['amountMinor' => $difference]);
-            return self::view(Db::one('SELECT * FROM orders WHERE id=?', [$id]));
+            return self::passengerView(Db::one('SELECT * FROM orders WHERE id=?', [$id]));
         });
     }
 }
