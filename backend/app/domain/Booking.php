@@ -21,26 +21,27 @@ final class Booking
             'SELECT c.* FROM companies c JOIN company_points p ON c.id=p.company_id JOIN company_points d ON c.id=d.company_id WHERE c.enabled=1 AND p.point_id=? AND d.point_id=?',
             [$pickup, $dropoff],
         );
-        $from = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=?', [$pickup]);
-        $to = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=?', [$dropoff]);
+        $from = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id', [$pickup]);
+        $to = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id', [$dropoff]);
+        if (!$from || !$to) {
+            throw new AppError('POINT_TRACK_REQUIRED', '上车点或下车点尚未配置停车轨道');
+        }
         $offers = [];
         $unavailable = [];
         foreach ($companies as $company) {
             $rules = Fare::validate(Db::data($company['fare']));
+            $vehicles = Db::all('SELECT * FROM vehicles WHERE company_id=? AND capacity>=?', [
+                $company['id'], $count,
+            ]);
             $found = false;
             foreach (
                 Db::all('SELECT * FROM centers WHERE company_id=? AND enabled=1', [$company['id']])
                 as $center
             ) {
                 foreach (Db::data($center['depots']) as $depot) {
-                    foreach (
-                        Db::all('SELECT * FROM vehicles WHERE company_id=? AND capacity>=?', [
-                            $company['id'],
-                            $count,
-                        ])
-                        as $vehicle
-                    ) {
+                    foreach ($vehicles as $vehicle) {
                         $best = null;
+                        // One bad track pair must not suppress the other pairs for this vehicle.
                         foreach ($from as $a) {
                             foreach ($to as $b) {
                                 if ($a['platform_id'] === $b['platform_id']) {

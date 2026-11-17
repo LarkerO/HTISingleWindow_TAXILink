@@ -163,6 +163,7 @@ https://taxi.example.com/api/auth/callback
 
 - 回调被拒绝时，核对 Portal 登记的 URI 及浏览器地址。
 - 已安装后更换乘客端端口时，在 Portal 登记新的乘客端回调，并同步修改 `backend/installation/config.json` 中的 `APP_ORIGIN` 和 `PORTAL_REDIRECT_URI`。手动配置的实例修改 `backend/.env` 中同名项。重启后端，确认前端在新端口监听，再从新乘客端地址发起登录。授权过程中请使用完整回调，授权码和 state 绑定原回调，手改浏览器地址无法迁移这次授权。Vite 开发服务建议用 `--strictPort`，端口被占用时会直接报错。
+- 报价时提示站点地址不一致，请使用页面提示的乘客端地址。浏览器地址的协议、主机名和端口都要与 `APP_ORIGIN` 一致。本机的 `localhost` 和 `127.0.0.1` 是两个不同的来源。
 - `invalid_scope` 时检查是否同时勾选两项权限。
 - 安装页会显示授权回调、换码或读取资料的失败阶段，以及可用的 HTTP 状态、Portal 错误码或 cURL 编号。换码失败时按错误码检查客户端凭据、回调地址、服务器时间或 HTTPS 证书。Windows 上未设置 `curl.cainfo` 时，支持原生 CA 的 PHP cURL 会使用 Windows 信任库。若仍提示证书错误，用 `php --ini` 确认 CLI 配置及所用 CA，修改后重启后端。
 - 回来仍未登录时检查同源 `/api/` 代理，以及是否使用登记时的主机名和端口。

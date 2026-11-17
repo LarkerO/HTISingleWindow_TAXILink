@@ -42,18 +42,14 @@ final class Auth
             throw new AppError('CSRF_INVALID', '页面已过期，请刷新后重试', 403);
         }
         $origin = $request->header('origin');
-        if (
-            $origin &&
-            !in_array(
-                $origin,
-                [
-                    Env::get('APP_ORIGIN', 'http://localhost:5173'),
-                    Env::get('ADMIN_ORIGIN', 'http://localhost:5174'),
-                ],
-                true,
-            )
-        ) {
-            throw new AppError('ORIGIN_INVALID', '请求来源无效', 403);
+        $passenger = Env::get('APP_ORIGIN', 'http://localhost:5173');
+        $admin = Env::get('ADMIN_ORIGIN', 'http://localhost:5174');
+        if ($origin && !in_array($origin, [$passenger, $admin], true)) {
+            throw new AppError(
+                'ORIGIN_INVALID',
+                "当前站点地址与后端配置不一致。请从乘客端 $passenger 或管理端 $admin 打开，核对协议、主机名和端口。",
+                403,
+            );
         }
     }
     public static function cookie(string $name, string $value, int $maxAge, ?bool $secure = null): string

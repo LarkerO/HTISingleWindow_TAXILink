@@ -11,6 +11,7 @@ const router = useRouter(),
   submitting = ref(false),
   quoteId = ref(''),
   expires = ref(0),
+  quoteError = ref(''),
   unavailable = ref<{ name: string; reason: string }[]>([]);
 const model = ref('');
 const models = computed(() => [...new Set(offers.value.map((o) => o.vehicleName))]);
@@ -45,6 +46,9 @@ async function quote() {
   const current = ++request;
   loading.value = true;
   offers.value = [];
+  unavailable.value = [];
+  selected.value = [];
+  quoteError.value = '';
   quoteId.value = '';
   orderKey = crypto.randomUUID();
   try {
@@ -66,7 +70,7 @@ async function quote() {
     unavailable.value = d.unavailable;
     selected.value = [...new Set(d.offers.map((o) => o.companyId))];
   } catch (e) {
-    report(e);
+    if (current === request) quoteError.value = e instanceof Error ? e.message : '请稍后重试';
   } finally {
     if (current === request) loading.value = false;
   }
@@ -150,6 +154,11 @@ onMounted(quote);
     <t-loading size="32px" />
     <h2>正在为你寻找路线</h2>
     <p>核实运营范围、轨道连通性与各企业报价</p>
+  </div>
+  <div v-else-if="quoteError" class="empty" role="alert">
+    <h2>报价请求失败</h2>
+    <p>{{ quoteError }}</p>
+    <button class="text-button" @click="quote">重试报价</button>
   </div>
   <template v-else
     ><button
