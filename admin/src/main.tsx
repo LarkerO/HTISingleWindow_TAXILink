@@ -132,7 +132,13 @@ function AdminApp() {
     [busy, setBusy] = useState(false),
     [drawerOrder, setDrawerOrder] = useState<RecordData | null>(null),
     [orderEvents, setOrderEvents] = useState<RecordData[]>([]);
-  const [summary, setSummary] = useState({ total: 0, active: 0, queued: 0, attention: 0 });
+  const [summary, setSummary] = useState({
+    total: 0,
+    active: 0,
+    queued: 0,
+    attention: 0,
+    mod: 'checking',
+  });
   const [form] = Form.useForm(),
     [fareForm] = Form.useForm();
   const table = useRef<ActionType>(undefined);
@@ -531,7 +537,7 @@ function AdminApp() {
                       : [],
                 },
               ];
-  const { total, active, queued, attention } = summary;
+  const { total, active, queued, attention, mod } = summary;
   if (!ready) return <div className="login-screen">正在连接运营平台…</div>;
   if (!user)
     return (
@@ -643,7 +649,18 @@ function AdminApp() {
               <div>
                 <span className="eyebrow">OPERATIONS AT A GLANCE</span>
                 <h1>每一程，都井然有序。</h1>
-                <p>{companies.find((c) => c.id === company)?.name || '平台'} · 运营数据概览</p>
+                <p>
+                  {companies.find((c) => c.id === company)?.name || '平台'} · 运营数据概览 ·{' '}
+                  {(
+                    {
+                      connected: '模组已连接',
+                      offline: '网关在线，模组未连接',
+                      unavailable: '模组网关不可用',
+                      demo: '模拟模组',
+                      checking: '检查模组连接中',
+                    } as Record<string, string>
+                  )[mod] || '模组状态未知'}
+                </p>
               </div>
               <div className="banner-orbit">
                 <span>↗</span>
@@ -670,7 +687,7 @@ function AdminApp() {
                         ][i]
                       }
                     </span>
-                    <Statistic title={label} value={value} />
+                    <Statistic title={label} value={value ?? 0} />
                     <span className="stat-note">{note}</span>
                   </Card>
                 </Col>

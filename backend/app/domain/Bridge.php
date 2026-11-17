@@ -4,6 +4,32 @@ namespace app\domain;
 
 final class Bridge
 {
+    public static function connectionStatus(): string
+    {
+        if (Env::demo()) {
+            return 'demo';
+        }
+        $token = Env::get('GATEWAY_TOKEN');
+        if (strlen($token) < 32) {
+            return 'unavailable';
+        }
+        try {
+            $status = Http::request(
+                Env::get('GATEWAY_URL', 'http://127.0.0.1:8789') . '/status',
+                null,
+                ['Authorization: Bearer ' . $token],
+                2,
+            );
+            return match ($status['connected'] ?? null) {
+                true => 'connected',
+                false => 'offline',
+                default => 'unavailable',
+            };
+        } catch (AppError) {
+            return 'unavailable';
+        }
+    }
+
     public static function command(string $type, array $params = []): array
     {
         if (Env::demo()) {

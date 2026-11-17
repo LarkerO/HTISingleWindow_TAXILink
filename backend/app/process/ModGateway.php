@@ -40,6 +40,10 @@ final class ModGateway
                 $this->reply($c, 401, ['error' => 'UNAUTHORIZED']);
                 return;
             }
+            if ($r->method() === 'GET' && $r->path() === '/status') {
+                $this->reply($c, 200, ['connected' => $this->mod !== null]);
+                return;
+            }
             if ($r->method() !== 'POST' || $r->path() !== '/command') {
                 $this->reply($c, 404, ['error' => 'NOT_FOUND']);
                 return;

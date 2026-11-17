@@ -237,11 +237,12 @@ final class ApiController
             } else {
                 Auth::platform($u);
             }
-            return Db::one(
-                "SELECT COUNT(*) AS total,SUM(CASE WHEN state IN ('ACTIVE','DISPATCHING','FINALIZING') THEN 1 ELSE 0 END) AS active,SUM(CASE WHEN state='QUEUED' THEN 1 ELSE 0 END) AS queued,SUM(CASE WHEN state='NEEDS_ATTENTION' THEN 1 ELSE 0 END) AS attention FROM orders" .
+            $counts = Db::one(
+                "SELECT COUNT(*) AS total,COUNT(CASE WHEN state IN ('ACTIVE','DISPATCHING','FINALIZING') THEN 1 END) AS active,COUNT(CASE WHEN state='QUEUED' THEN 1 END) AS queued,COUNT(CASE WHEN state='NEEDS_ATTENTION' THEN 1 END) AS attention FROM orders" .
                     $where,
                 $args,
             );
+            return array_map('intval', $counts) + ['mod' => Bridge::connectionStatus()];
         }
         if (
             $method === 'POST' &&

@@ -204,6 +204,8 @@ TAXILINK_MOD_PUBLIC_KEY=keys/mod-public.pem
 
 在模组工具中授权单轨专用车厂。管理后台读取 MTR 目录后创建车辆中心、车型和虚拟点映射。
 
+管理端概览会分别显示网关不可用、网关在线但模组未连接、模组已连接。网关不可用时先检查 PHP 后端日志和内部 RPC 端口 8789。同机测试若网关在线但模组未连接，确认游戏实例的 `config/taxilink.json` 已启用，WebSocket 地址指向模组网关的 8788 端口，`serverId` 与后端一致，且模组配置可读到配套的两份 SM2 文件。修改后退出并重新进入存档，查看游戏实例的 `logs/latest.log` 中的 TAXILink 启动或连接错误。
+
 ## 更新、备份与验收
 
 - 浏览器安装配置和私钥位于 `backend/installation`。升级时保留该目录与手动配置文件，备份数据库及模组状态日志。更新后运行 `php backend/bin/console.php migrate`，重启后端并发布两端静态产物。
