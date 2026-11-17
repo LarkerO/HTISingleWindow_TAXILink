@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace app\process;
-use app\domain\{Booking, Db, Env};
+use app\domain\{Booking, Db, Env, SystemLog};
 use Workerman\{Worker, Timer};
 use Workerman\Connection\TcpConnection;
 use Workerman\Protocols\Http\Request;
@@ -72,9 +72,11 @@ final class PassengerStream
                 true,
             )
         ) {
+            SystemLog::record('passenger', 'connection_rejected', $c->id, result: $session ? 'origin_or_path' : 'session_required');
             $c->close();
             return;
         }
+        SystemLog::record('passenger', 'connected', $c->id);
         $this->clients[$c->id] = [$c, $session];
     }
     public function onMessage(TcpConnection $c, string $raw): void
@@ -85,6 +87,9 @@ final class PassengerStream
     }
     public function onClose(TcpConnection $c): void
     {
-        unset($this->clients[$c->id]);
+        if (isset($this->clients[$c->id])) {
+            SystemLog::record('passenger', 'disconnected', $c->id);
+            unset($this->clients[$c->id]);
+        }
     }
 }

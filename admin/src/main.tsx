@@ -52,6 +52,7 @@ import './style.css';
 type RecordData = Record<string, any>;
 const menus = [
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
+  { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/orders', name: '订单与调度', icon: <UnorderedListOutlined /> },
   { path: '/companies', name: '运营企业', icon: <ApartmentOutlined /> },
   { path: '/centers', name: '车辆中心', icon: <CarOutlined /> },
@@ -209,7 +210,7 @@ function AdminApp() {
     load();
   }, [user, page, company, companies]);
   useEffect(() => {
-    if (!user || !['/orders', '/overview'].includes(page)) return;
+    if (!user || !['/orders', '/overview', '/system_logs'].includes(page)) return;
     const t = setInterval(load, 7000);
     return () => clearInterval(t);
   }, [user, page, company]);
@@ -583,7 +584,8 @@ function AdminApp() {
       location={{ pathname: page }}
       route={{
         routes: menus.filter(
-          (m) => user.platformAdmin || !['/payments', '/audit_logs'].includes(m.path),
+          (m) =>
+            user.platformAdmin || !['/payments', '/audit_logs', '/system_logs'].includes(m.path),
         ),
       }}
       menuItemRender={(item, dom) => (
@@ -643,7 +645,78 @@ function AdminApp() {
           />,
         ]}
       >
-        {page === '/overview' ? (
+        {page === '/system_logs' ? (
+          <ProTable<RecordData>
+            rowKey="id"
+            headerTitle="WebSocket 系统日志"
+            dataSource={rows}
+            loading={loading}
+            search={false}
+            pagination={{ pageSize: 25 }}
+            toolBarRender={() => [
+              <Button key="refresh" onClick={load}>
+                刷新
+              </Button>,
+            ]}
+            columns={[
+              {
+                title: '时间',
+                dataIndex: 'created_at',
+                render: (_, row) =>
+                  new Date(Number(row.created_at)).toLocaleString('zh-CN', {
+                    fractionalSecondDigits: 3,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  }),
+              },
+              {
+                title: '通道',
+                dataIndex: 'channel',
+                valueEnum: { mod: '模组', passenger: '乘客端' },
+              },
+              {
+                title: '事件',
+                dataIndex: 'event',
+                valueEnum: {
+                  connected: '连接成功',
+                  connection_rejected: '连接拒绝',
+                  disconnected: '断开连接',
+                  message_rejected: '消息拒绝',
+                  command_sent: '指令下发',
+                  command_finished: '指令结束',
+                },
+              },
+              { title: '连接 ID', dataIndex: 'connection_id' },
+              { title: '指令', dataIndex: 'command' },
+              { title: '请求 ID', dataIndex: 'request_id', copyable: true },
+              {
+                title: '总耗时',
+                dataIndex: 'duration_ms',
+                render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
+              },
+              {
+                title: '结果',
+                dataIndex: 'result',
+                valueEnum: {
+                  success: '成功',
+                  mod_error: '模组返回错误',
+                  timeout: '超时',
+                  send_failed: '下发失败',
+                  disconnected: '连接断开',
+                  handshake_invalid: '握手认证失败',
+                  subscription_timeout: '订阅超时',
+                  message_invalid: '消息验证失败',
+                  origin_or_path: '来源或路径不匹配',
+                  session_required: '会话无效',
+                },
+              },
+            ]}
+          />
+        ) : page === '/overview' ? (
           <>
             <div className="overview-banner">
               <div>

@@ -206,6 +206,8 @@ TAXILINK_MOD_PUBLIC_KEY=keys/mod-public.pem
 
 管理端概览会分别显示网关不可用、网关在线但模组未连接、模组已连接。网关不可用时先检查 PHP 后端日志和内部 RPC 端口 8789。同机测试若网关在线但模组未连接，确认游戏实例的 `config/taxilink.json` 已启用，WebSocket 地址指向模组网关的 8788 端口，`serverId` 与后端一致，且模组配置可读到配套的两份 SM2 文件。修改后退出并重新进入存档，查看游戏实例的 `logs/latest.log` 中的 TAXILink 启动或连接错误。
 
+平台管理员可在「系统日志」查看最近 1000 条 WebSocket 事件。用请求 ID 对照「指令下发」和「指令结束」。总耗时从网关发送到收到模组响应、超时或断线，包含传输和模组排队时间。日志保存在数据库中，升级后先运行迁移再重启后端。
+
 ## 更新、备份与验收
 
 - 浏览器安装配置和私钥位于 `backend/installation`。升级时保留该目录与手动配置文件，备份数据库及模组状态日志。更新后运行 `php backend/bin/console.php migrate`，重启后端并发布两端静态产物。

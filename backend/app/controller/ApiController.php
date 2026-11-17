@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace app\controller;
-use app\domain\{Admin, AppError, Auth, Booking, Bridge, Db, Dispatch, Env, Install, Portal, RateLimit};
+use app\domain\{Admin, AppError, Auth, Booking, Bridge, Db, Dispatch, Env, Install, Portal, RateLimit, SystemLog};
 use support\{Request, Response};
 
 final class ApiController
@@ -224,6 +224,10 @@ final class ApiController
         }
         if ($method === 'POST' && $path === '/api/invitations/accept') {
             return Admin::accept($u, (string) ($input['token'] ?? ''));
+        }
+        if ($method === 'GET' && $path === '/api/admin/system_logs') {
+            Auth::platform($u);
+            return SystemLog::recent();
         }
         if ($method === 'GET' && $path === '/api/admin/summary') {
             $company = $r->get('companyId');

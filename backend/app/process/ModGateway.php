@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace app\process;
-use app\domain\{Db, Env};
+use app\domain\{Db, Env, SystemLog};
 use Workerman\{Worker, Timer};
 use Workerman\Connection\TcpConnection;
 use Workerman\Protocols\Http\{Request, Response};
@@ -96,26 +96,25 @@ final class ModGateway
                     'dimension' => $input['dimension'],
                     'params' => $input['params'] ?: new \stdClass(),
                 ];
-                $timer = Timer::add(
-                    15,
-                    function () use ($c, $id): void {
-                        unset($this->pending[$id]);
-                        $this->reply($c, 504, ['error' => 'MOD_RESPONSE_TIMEOUT']);
-                    },
-                    [],
-                    false,
-                );
-                $this->pending[$id] = [$c, $timer];
-                $this->mod->send($this->wire->sign('gateway', Db::json($frame)));
+                $payload = $this->wire->sign('gateway', Db::json($frame));
+                $started = hrtime(true);
+                $timer = Timer::add(15, function () use ($id): void {
+                    $this->finish($id, 504, ['error' => 'MOD_RESPONSE_TIMEOUT'], 'timeout');
+                }, [], false);
+                $this->pending[$id] = [$c, $timer, $started, $frame['type'], $this->mod->id];
+                if ($this->mod->send($payload) === false) {
+                    $this->finish($id, 503, ['error' => 'MOD_SEND_FAILED'], 'send_failed');
+                    return;
+                }
+                SystemLog::record('mod', 'command_sent', $this->mod->id, $id, $frame['type']);
             } catch (\Throwable $e) {
                 $this->reply($c, 400, ['error' => 'INVALID_COMMAND']);
             }
         };
         $http->onClose = function (TcpConnection $c): void {
-            foreach ($this->pending as $id => [$waiting, $timer]) {
+            foreach ($this->pending as $id => [$waiting]) {
                 if ($waiting === $c) {
-                    Timer::del($timer);
-                    unset($this->pending[$id]);
+                    $this->pending[$id][0] = null;
                 }
             }
         };
@@ -128,6 +127,9 @@ final class ModGateway
             5,
             function () use ($c): void {
                 if ($this->mod !== $c) {
+                    if (isset($this->authorized[$c->id])) {
+                        SystemLog::record('mod', 'connection_rejected', $c->id, result: 'subscription_timeout');
+                    }
                     $c->close();
                 }
             },
@@ -151,7 +153,8 @@ final class ModGateway
                 throw new \RuntimeException();
             }
             $this->authorized[$c->id] = true;
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
+            SystemLog::record('mod', 'connection_rejected', $c->id, result: 'handshake_invalid');
             $c->close();
         }
     }
@@ -186,16 +189,14 @@ final class ModGateway
                 }
                 $this->mod = $c;
                 $c->send($this->wire->sign('gateway', Db::json(['type' => 'subscribed'])));
+                SystemLog::record('mod', 'connected', $c->id);
                 return;
             }
             if ($this->mod !== $c) {
                 throw new \RuntimeException();
             }
             if (($m['type'] ?? '') === 'response' && isset($this->pending[$m['requestId'] ?? ''])) {
-                [$waiting, $timer] = $this->pending[$m['requestId']];
-                Timer::del($timer);
-                unset($this->pending[$m['requestId']]);
-                $this->reply($waiting, 200, $m);
+                $this->finish($m['requestId'], 200, $m, ($m['ok'] ?? false) === true ? 'success' : 'mod_error');
             } elseif (
                 str_starts_with($m['type'] ?? '', 'ride.') ||
                 ($m['type'] ?? '') === 'taxi.telemetry'
@@ -207,7 +208,9 @@ final class ModGateway
                     'created_at' => (int) ($m['timestamp'] ?? time() * 1000),
                 ]);
             }
-        } catch (\Throwable $e) {
+        } catch (\Throwable) {
+            SystemLog::record('mod', $this->mod === $c ? 'message_rejected' : 'connection_rejected',
+                $c->id, result: 'message_invalid');
             $c->close();
         }
     }
@@ -216,11 +219,24 @@ final class ModGateway
         unset($this->authorized[$c->id]);
         if ($this->mod === $c) {
             $this->mod = null;
-            foreach ($this->pending as [$waiting, $timer]) {
-                Timer::del($timer);
-                $this->reply($waiting, 503, ['error' => 'MOD_DISCONNECTED']);
+            SystemLog::record('mod', 'disconnected', $c->id);
+            foreach (array_keys($this->pending) as $id) {
+                $this->finish($id, 503, ['error' => 'MOD_DISCONNECTED'], 'disconnected');
             }
-            $this->pending = [];
+        }
+    }
+    private function finish(string $id, int $status, array $response, string $result): void
+    {
+        if (!isset($this->pending[$id])) {
+            return;
+        }
+        [$waiting, $timer, $started, $command, $connection] = $this->pending[$id];
+        unset($this->pending[$id]);
+        $duration = intdiv(hrtime(true) - $started, 1_000_000);
+        Timer::del($timer);
+        SystemLog::record('mod', 'command_finished', $connection, $id, $command, $duration, $result);
+        if ($waiting !== null) {
+            $this->reply($waiting, $status, $response);
         }
     }
     private function reply(TcpConnection $c, int $status, array $body): void

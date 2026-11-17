@@ -157,6 +157,8 @@ final class Db
                 'id VARCHAR(64) PRIMARY KEY, order_id VARCHAR(64) NOT NULL, kind VARCHAR(32) NOT NULL, amount BIGINT NOT NULL, created_at BIGINT NOT NULL, demonstration INTEGER NOT NULL DEFAULT 1',
             'audit_logs' =>
                 'id VARCHAR(64) PRIMARY KEY, user_id VARCHAR(64) NOT NULL, action VARCHAR(80) NOT NULL, target VARCHAR(64) NOT NULL, data TEXT NOT NULL, created_at BIGINT NOT NULL',
+            'system_logs' =>
+                'id VARCHAR(64) PRIMARY KEY, created_at BIGINT NOT NULL, channel VARCHAR(20) NOT NULL, event VARCHAR(32) NOT NULL, connection_id BIGINT, request_id VARCHAR(64), command VARCHAR(64), duration_ms BIGINT, result VARCHAR(64)',
             'mod_inbox' =>
                 'id VARCHAR(64) PRIMARY KEY, data TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL',
             'demo_rides' =>

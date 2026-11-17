@@ -49,6 +49,8 @@ Linux 从 `backend` 运行 `php start.php start`。首次运行请访问上述 *
 
 ## 已实现的业务
 
+- 平台管理员可在系统日志查看 WebSocket 连接结果、指令下发时间、请求 ID 和总耗时。
+
 - 游客浏览与选点，需登录操作弹出提示，由用户主动前往 Portal；账号无需绑定 Minecraft。
 - Portal 授权码 + PKCE S256、state 及 Cookie 绑定，服务器换取 opaque token 并调用 userinfo，创建两小时本地会话；不把上游令牌发给浏览器。
 - 平台创建企业、签发一次性邀请；账号支持跨企业、多角色成员身份。Portal 的全局角色不自动成为本平台权限。
