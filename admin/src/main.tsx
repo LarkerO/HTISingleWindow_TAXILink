@@ -1,4 +1,5 @@
 import InstallPage from './InstallPage';
+import VehicleFields, { defaultCar } from './VehicleFields';
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -100,18 +101,7 @@ const defaultVehicle = {
   maxSpeedKmh: 60,
   accelerationMps2: 1,
   decelerationMps2: 1,
-  vehicleCars: [
-    {
-      vehicleId: '',
-      length: 4,
-      width: 2,
-      capacity: 4,
-      bogie1Position: -1,
-      bogie2Position: 1,
-      couplingPadding1: 0,
-      couplingPadding2: 0,
-    },
-  ],
+  vehicleCars: [{ ...defaultCar }],
 };
 const parse = (s: unknown, fallback: any = {}) =>
   typeof s === 'string' ? JSON.parse(s) : s || fallback;
@@ -262,8 +252,7 @@ function AdminApp() {
         setCatalog((v) => ({ ...v, depots, sidings }));
         values.depotPairs = parse(row?.depots, []).map((d: any) => d.depotId + '|' + d.sidingId);
       }
-      if (r === 'vehicles')
-        values.vehicleConfig = JSON.stringify(parse(row?.config, defaultVehicle), null, 2);
+      if (r === 'vehicles') values.config = parse(row?.config, defaultVehicle);
       setResource(r);
       setEdit(row || {});
       form.resetFields();
@@ -281,7 +270,6 @@ function AdminApp() {
           const [depotId, sidingId] = p.split('|');
           return { depotId, sidingId };
         });
-      if (resource === 'vehicles') values.config = JSON.parse(values.vehicleConfig);
       values.companyId = company;
       await api(
         '/admin/' + resource + (edit?.id ? '/' + edit.id : ''),
@@ -1248,23 +1236,7 @@ function AdminApp() {
               />
             </Form.Item>
           )}
-          {resource === 'vehicles' && (
-            <>
-              <Alert
-                type="info"
-                showIcon
-                message="填写服务器真实资源 ID 与车辆参数，容量由每节车辆 capacity 合计。"
-                style={{ marginBottom: 20 }}
-              />
-              <Form.Item
-                name="vehicleConfig"
-                label="车辆编组及行驶参数"
-                rules={[{ required: true }]}
-              >
-                <Input.TextArea rows={19} className="code-input" />
-              </Form.Item>
-            </>
-          )}
+          {resource === 'vehicles' && <VehicleFields form={form} />}
         </Form>
       </Drawer>
       <Modal
