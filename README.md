@@ -89,3 +89,7 @@ npm run test:e2e        # 需先启动后端和两个 Vite 开发服务
 乘客首页、行程详情和管理端订单、车厂及站台配置默认显示 BlueMap 2D 底图。平台管理员在 **BlueMap 设置** 中切换地图 ID，并控制两端是否可打开原生 3D 世界视图。部署和瓦片地址见 [BlueMap 部署说明](docs/DEPLOYMENT.md#bluemap-底图)。
 
 本地回归使用 `npm run build` 和 `npm test`。
+
+## 图片与公告
+
+腾讯云 COS 配置、车型/公司图片维护及公告发布规则见 [图片与公告指南](docs/MEDIA_ANNOUNCEMENTS.md)。

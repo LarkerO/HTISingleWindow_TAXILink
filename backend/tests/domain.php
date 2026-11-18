@@ -28,7 +28,12 @@ function rejects(callable $f, string $key, string $message): void
 Db::migrate();
 Demo::seed();
 $u = Db::one('SELECT * FROM users WHERE id=?', ['demo-user']);
-$mapRequest = static function (string $method, string $path, ?string $token = null, array $input = []) {
+$mapRequest = static function (
+    string $method,
+    string $path,
+    ?string $token = null,
+    array $input = [],
+) {
     $raw = "$method $path HTTP/1.1\r\nHost: localhost\r\n";
     $body = $method === 'POST' ? Db::json($input) : '';
     if ($token !== null) {
@@ -38,7 +43,9 @@ $mapRequest = static function (string $method, string $path, ?string $token = nu
     if ($body !== '') {
         $raw .= "Content-Type: application/json\r\nContent-Length: " . strlen($body) . "\r\n";
     }
-    return (new \app\controller\ApiController())->handle(new \support\Request($raw . "\r\n" . $body));
+    return (new \app\controller\ApiController())->handle(
+        new \support\Request($raw . "\r\n" . $body),
+    );
 };
 $mapSettings = ['mapId' => 'heishan7_0', 'allow3d' => false];
 $publicMap = '/api/map-settings';
@@ -49,8 +56,17 @@ check(
 );
 $mapUser = Auth::login(['sub' => 'map-user'], 'map-admin');
 $mapAdmin = Auth::login(['sub' => 'map-admin'], 'map-admin');
-check($mapRequest('POST', $adminMap, $mapUser, $mapSettings)->getStatusCode() === 403, '普通账号不能修改底图');
-check($mapRequest('POST', $adminMap, $mapAdmin, ['mapId' => '../other', 'allow3d' => true])->getStatusCode() === 422, 'BlueMap 拒绝非法地图 ID');
+check(
+    $mapRequest('POST', $adminMap, $mapUser, $mapSettings)->getStatusCode() === 403,
+    '普通账号不能修改底图',
+);
+check(
+    $mapRequest('POST', $adminMap, $mapAdmin, [
+        'mapId' => '../other',
+        'allow3d' => true,
+    ])->getStatusCode() === 422,
+    'BlueMap 拒绝非法地图 ID',
+);
 check(
     $mapRequest('POST', $adminMap, $mapAdmin, $mapSettings)->getStatusCode() === 200 &&
         Db::data($mapRequest('GET', $publicMap)->rawBody()) === $mapSettings,
@@ -61,6 +77,172 @@ check(
     $mapRequest('POST', $adminMap, $mapAdmin, $mapSettings)->getStatusCode() === 200 &&
         Db::data($mapRequest('GET', $publicMap)->rawBody()) === $mapSettings,
     'BlueMap 设置支持重复更新',
+);
+// Content management access and visibility are enforced on the server.
+$announcement = [
+    'title' => '出行公告',
+    'markdown' => '# 服务调整\n\n请提前规划出行。',
+    'placements' => ['booking'],
+    'published' => true,
+    'listed' => false,
+    'login_required' => false,
+];
+check(
+    $mapRequest('POST', '/api/admin/announcements', $mapUser, $announcement)->getStatusCode() ===
+        403,
+    '普通用户不能编写公告',
+);
+$created = $mapRequest('POST', '/api/admin/announcements', $mapAdmin, $announcement);
+check($created->getStatusCode() === 200, '平台管理员创建公告');
+$announcementId = Db::data($created->rawBody())['id'];
+check(
+    count(
+        Db::data($mapRequest('GET', '/api/announcements?placement=booking')->rawBody())['items'],
+    ) === 1 && count(Db::data($mapRequest('GET', '/api/announcements')->rawBody())['items']) === 0,
+    '通知栏位置独立于列表可见性',
+);
+check(
+    !isset(
+        Db::data($mapRequest('GET', '/api/announcements?placement=booking')->rawBody())['items'][0][
+            'markdown'
+        ],
+    ),
+    '列表不返回公告正文',
+);
+check(
+    $mapRequest('GET', '/api/announcements/' . $announcementId)->getStatusCode() === 200,
+    '隐藏列表的公告仍可从通知栏查看详情',
+);
+$restricted = \app\domain\Announcements::save(
+    Db::one('SELECT * FROM users WHERE platform_admin=1'),
+    [...$announcement, 'listed' => true, 'login_required' => true],
+    $announcementId,
+);
+check(
+    $mapRequest('GET', '/api/announcements/' . $announcementId)->getStatusCode() === 401 &&
+        count(
+            Db::data($mapRequest('GET', '/api/announcements?placement=booking')->rawBody())[
+                'items'
+            ],
+        ) === 0,
+    '登录限制在列表和详情一致执行',
+);
+check(
+    $mapRequest('GET', '/api/announcements/' . $announcementId, $mapUser)->getStatusCode() ===
+        200 &&
+        count(Db::data($mapRequest('GET', '/api/announcements', $mapUser)->rawBody())['items']) ===
+            1,
+    '登录乘客可查看受限公告',
+);
+\app\domain\Announcements::save(
+    Db::one('SELECT * FROM users WHERE platform_admin=1'),
+    [...$announcement, 'published' => false],
+    $announcementId,
+);
+check(
+    $mapRequest('GET', '/api/announcements/' . $announcementId, $mapAdmin)->getStatusCode() === 404,
+    '下架立即阻止乘客访问',
+);
+check(
+    $mapRequest('POST', '/api/admin/announcements', $mapAdmin, [
+        ...$announcement,
+        'placements' => ['invalid'],
+    ])->getStatusCode() === 422,
+    '公告拒绝未知展示位置',
+);
+check(
+    $mapRequest('POST', '/api/admin/announcements', $mapAdmin, [
+        ...$announcement,
+        'placements' => [['booking']],
+    ])->getStatusCode() === 422,
+    '公告拒绝嵌套位置参数',
+);
+check(
+    $mapRequest('GET', '/api/admin/media/settings', $mapUser)->getStatusCode() === 403,
+    'COS 设置仅平台管理员可见',
+);
+check(
+    !str_contains($mapRequest('GET', '/api/admin/media/settings', $mapAdmin)->rawBody(), 'SECRET'),
+    'COS 设置不暴露密钥',
+);
+rejects(
+    fn() => \app\domain\Media::imageUrl('javascript:alert(1)'),
+    'VALIDATION',
+    '图片字段拒绝脚本地址',
+);
+rejects(
+    fn() => \app\domain\Media::upload(
+        Db::one('SELECT * FROM users WHERE portal_sub=?', ['map-user']),
+        'vehicle',
+        'other-company',
+        null,
+    ),
+    'FORBIDDEN',
+    '图片上传检查企业权限',
+);
+$uploadPath = tempnam(sys_get_temp_dir(), 'taxilink-media-');
+file_put_contents($uploadPath, '<svg onload="alert(1)"></svg>');
+$uploadFile = new \Webman\Http\UploadFile($uploadPath, 'image.png', 'image/png', UPLOAD_ERR_OK);
+$mediaAdmin = Db::one('SELECT * FROM users WHERE platform_admin=1');
+rejects(
+    fn() => \app\domain\Media::upload($mediaAdmin, 'announcement', '', $uploadFile),
+    'VALIDATION',
+    '服务端拒绝伪装成 PNG 的 SVG',
+);
+file_put_contents(
+    $uploadPath,
+    base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMfoAAAAASUVORK5CYII=',
+    ),
+);
+if (!\app\domain\Media::settings()['configured']) {
+    rejects(
+        fn() => \app\domain\Media::upload($mediaAdmin, 'company', '', $uploadFile),
+        'COS_NOT_CONFIGURED',
+        '未配置 COS 时上传明确返回配置错误',
+    );
+}
+unlink($uploadPath);
+Db::run('UPDATE companies SET image_url=? WHERE id=?', [
+    'https://images.example/company.png',
+    'jade',
+]);
+Db::run('UPDATE vehicles SET image_url=? WHERE company_id=?', [
+    'https://images.example/car.png',
+    'jade',
+]);
+$imageQuote = Booking::quote($u, [
+    'pickupId' => 'riverside',
+    'dropoffId' => 'museum',
+    'passengers' => 2,
+]);
+$imageOffer = array_values(
+    array_filter($imageQuote['offers'], fn($offer) => $offer['companyId'] === 'jade'),
+)[0];
+check(
+    $imageOffer['companyImageUrl'] === 'https://images.example/company.png' &&
+        $imageOffer['vehicleImageUrl'] === 'https://images.example/car.png',
+    '车型和公司图片进入报价',
+);
+$imageOrder = Booking::create(
+    $u,
+    ['quoteId' => $imageQuote['id'], 'companyIds' => ['jade']],
+    'image-snapshot-test',
+);
+Db::run('UPDATE vehicles SET image_url=? WHERE company_id=?', [
+    'https://images.example/new.png',
+    'jade',
+]);
+check(
+    $imageOrder['offers'][0]['vehicleImageUrl'] === 'https://images.example/car.png',
+    '订单保留接单时图片快照',
+);
+Db::run('DELETE FROM candidates WHERE order_id=?', [$imageOrder['id']]);
+Db::run('DELETE FROM orders WHERE id=?', [$imageOrder['id']]);
+Db::migrate();
+check(
+    Db::one('SELECT id FROM announcements WHERE id=?', [$announcementId]) !== null,
+    '重复迁移保留公告数据',
 );
 $q = Booking::quote($u, ['pickupId' => 'riverside', 'dropoffId' => 'museum', 'passengers' => 2]);
 check(count($q['offers']) === 2, '同一路线可得到两个企业报价');
@@ -382,16 +564,27 @@ check(
     '重启回收订单关闭后停止重试并生成演示退款',
 );
 $earlyId = Db::id();
-Db::insert('orders', array_replace($settled, [
-    'id' => $earlyId, 'idempotency_key' => 'early-settlement-fixture', 'state' => 'ACTIVE',
-    'telemetry' => '{}', 'billing_started' => $started, 'billing_ended' => null, 'paid' => 20000,
-]));
+Db::insert(
+    'orders',
+    array_replace($settled, [
+        'id' => $earlyId,
+        'idempotency_key' => 'early-settlement-fixture',
+        'state' => 'ACTIVE',
+        'telemetry' => '{}',
+        'billing_started' => $started,
+        'billing_ended' => null,
+        'paid' => 20000,
+    ]),
+);
 Dispatch::ingest($earlyId, 'passenger.boarded', [], $started * 1000, 'early-boarded');
 $dropoff = [
-    'phase' => 'ACTIVE', 'stage' => 'WAITING_DROPOFF', 'onboardCount' => 1,
+    'phase' => 'ACTIVE',
+    'stage' => 'WAITING_DROPOFF',
+    'onboardCount' => 1,
     'position' => ['x' => 5, 'z' => 0],
     'geometry' => [
-        'progressMeters' => 50, 'totalMeters' => 80,
+        'progressMeters' => 50,
+        'totalMeters' => 80,
         'legs' => [
             ['stage' => 'ON_TRIP', 'startMeters' => 10, 'endMeters' => 50],
             ['stage' => 'RETURNING', 'startMeters' => 50, 'endMeters' => 80],
@@ -401,28 +594,47 @@ $dropoff = [
 ];
 $arrival = ($started + 60) * 1000;
 Dispatch::ingest($earlyId, 'reconcile.final', $dropoff, $arrival);
-check(Db::one('SELECT state FROM orders WHERE id=?', [$earlyId])['state'] === 'ACTIVE', '抵达时仍有人则继续等待下车');
+check(
+    Db::one('SELECT state FROM orders WHERE id=?', [$earlyId])['state'] === 'ACTIVE',
+    '抵达时仍有人则继续等待下车',
+);
 $dropoff['onboardCount'] = 0;
 Dispatch::ingest($earlyId, 'reconcile.final', $dropoff, $arrival + 1000);
 $early = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
-check($early['state'] === 'COMPLETED' && (int) $early['vehicle_pending'] === 1, '全部下车后立即结束乘客订单并继续跟踪车辆');
-check((int) $early['billing_ended'] === $started + 60 && (int) $early['paid'] === (int) $early['amount'], '下车时按抵达时间结算并退款');
+check(
+    $early['state'] === 'COMPLETED' && (int) $early['vehicle_pending'] === 1,
+    '全部下车后立即结束乘客订单并继续跟踪车辆',
+);
+check(
+    (int) $early['billing_ended'] === $started + 60 &&
+        (int) $early['paid'] === (int) $early['amount'],
+    '下车时按抵达时间结算并退款',
+);
 $returning = array_replace($dropoff, ['stage' => 'RETURNING', 'stageLabel' => '回库中']);
 Dispatch::ingest($earlyId, 'taxi.telemetry', $returning, $arrival + 2000);
 $during = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
 $passenger = Booking::passengerView($during)['telemetry'];
 check(
     Booking::view($during)['telemetry']['stage'] === 'RETURNING' &&
-    $passenger['stage'] === 'COMPLETED' && !isset($passenger['position']) &&
-    count($passenger['geometry']['legs']) === 1 && end($passenger['geometry']['points'])[0] === 50,
+        $passenger['stage'] === 'COMPLETED' &&
+        !isset($passenger['position']) &&
+        count($passenger['geometry']['legs']) === 1 &&
+        end($passenger['geometry']['points'])[0] === 50,
     '运营端可见回库，乘客地图在下车点截断并隐藏车辆',
 );
-Dispatch::ingest($earlyId, 'reconcile.final', ['phase' => 'FAILED', 'stage' => 'FAILED'], $arrival + 3000);
+Dispatch::ingest(
+    $earlyId,
+    'reconcile.final',
+    ['phase' => 'FAILED', 'stage' => 'FAILED'],
+    $arrival + 3000,
+);
 $after = Db::one('SELECT * FROM orders WHERE id=?', [$earlyId]);
 check(
-    $after['state'] === 'COMPLETED' && (int) $after['vehicle_pending'] === 0 &&
-    $after['amount'] === $early['amount'] && $after['paid'] === $early['paid'] &&
-    count(Db::all('SELECT id FROM payments WHERE order_id=?', [$earlyId])) === 1,
+    $after['state'] === 'COMPLETED' &&
+        (int) $after['vehicle_pending'] === 0 &&
+        $after['amount'] === $early['amount'] &&
+        $after['paid'] === $early['paid'] &&
+        count(Db::all('SELECT id FROM payments WHERE order_id=?', [$earlyId])) === 1,
     '回库失败只结束车辆跟踪，已结算订单和退款保持不变',
 );
 echo "\n$checks 项领域验证通过\n";

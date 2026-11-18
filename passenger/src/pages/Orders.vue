@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NoticeBar from '../components/NoticeBar.vue';
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, user, requireLogin, report, money, stateLabel, type Order } from '../api';
@@ -27,6 +28,7 @@ async function load(reset = false) {
 onMounted(() => load());
 </script>
 <template>
+  <NoticeBar placement="orders" />
   <section class="welcome compact">
     <div class="eyebrow">EVERY JOURNEY MATTERS</div>
     <h1>我的行程</h1>

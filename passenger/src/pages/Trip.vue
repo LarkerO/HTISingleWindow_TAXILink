@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NoticeBar from '../components/NoticeBar.vue';
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, requireLogin, report, money, stateLabel, type Order } from '../api';
@@ -96,6 +97,29 @@ const eta = computed(() => {
 });
 </script>
 <template>
+  <NoticeBar placement="orders" />
+  <section v-if="order" class="trip-branding">
+    <div
+      v-for="offer in order.offers.filter(
+        (o) => !order?.companyId || o.companyId === order.companyId,
+      )"
+      :key="offer.id"
+    >
+      <img
+        v-if="offer.companyImageUrl"
+        :src="offer.companyImageUrl"
+        class="company-mark"
+        alt="公司标志"
+      />
+      <img
+        v-if="offer.vehicleImageUrl"
+        :src="offer.vehicleImageUrl"
+        class="vehicle-image"
+        alt="车型示意图"
+      />
+      {{ offer.companyName }} · {{ offer.vehicleName }}
+    </div>
+  </section>
   <section class="trip-head">
     <button class="back" @click="router.push('/orders')">←</button><strong>行程详情</strong
     ><span class="connection"

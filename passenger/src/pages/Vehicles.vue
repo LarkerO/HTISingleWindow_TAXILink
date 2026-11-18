@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NoticeBar from '../components/NoticeBar.vue';
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, user, requireLogin, report, money, type Offer, type Order } from '../api';
@@ -122,6 +123,7 @@ const fareLabels: Record<string, string> = {
 onMounted(quote);
 </script>
 <template>
+  <NoticeBar placement="booking" />
   <section class="page-head">
     <button class="back" @click="router.push('/')">←</button>
     <div>
@@ -143,6 +145,12 @@ onMounted(quote);
   <div v-if="models.length" class="model-options">
     <button :class="{ chosen: !model }" @click="model = ''">全部车型</button
     ><button v-for="m in models" :key="m" :class="{ chosen: model === m }" @click="model = m">
+      <img
+        v-if="offers.find((o) => o.vehicleName === m)?.vehicleImageUrl"
+        :src="offers.find((o) => o.vehicleName === m)?.vehicleImageUrl"
+        class="vehicle-image"
+        alt="车型示意图"
+      />
       {{ m }}
     </button>
   </div>
@@ -169,7 +177,12 @@ onMounted(quote);
       @click="toggle(c.id)"
     >
       <div class="offer-top">
-        <span class="company-mark">{{ c.name[0] }}</span
+        <img
+          v-if="c.offer.companyImageUrl"
+          :src="c.offer.companyImageUrl"
+          class="company-mark"
+          alt="公司标志"
+        /><span v-else class="company-mark">{{ c.name[0] }}</span
         ><span
           ><strong>{{ c.name }}</strong
           ><small>{{ c.offer.vehicleName }} · {{ c.offer.capacity }} 人座</small></span

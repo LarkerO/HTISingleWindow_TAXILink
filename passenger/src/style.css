@@ -952,3 +952,68 @@ main {
   border-color: #77956b;
   color: #426f37;
 }
+
+.markdown-body {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-body pre {
+  overflow-x: auto;
+  padding: 16px;
+  background: #f4f7f6;
+  border-radius: 8px;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #dce5e1;
+  padding: 8px;
+}
+
+.notice-bar {
+  display: grid;
+  gap: 8px;
+  background: #edf7f2;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.notice-bar a {
+  color: #17684c;
+  text-decoration: none;
+}
+.announcement-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  margin-bottom: 12px;
+  text-decoration: none;
+  color: inherit;
+}
+.announcement-item small {
+  color: #526a63;
+}
+.announcement-detail {
+  padding: 24px;
+}
+.vehicle-image {
+  width: 82px;
+  height: 46px;
+  object-fit: contain;
+  vertical-align: middle;
+}
+img.company-mark {
+  object-fit: contain;
+}
+.trip-branding {
+  padding: 8px 16px;
+}

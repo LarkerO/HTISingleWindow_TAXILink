@@ -16,7 +16,7 @@ final class Auth
     {
         // Only local application routes are accepted, never arbitrary redirect URLs.
         return preg_match(
-            '#^/(?:orders|profile|vehicles|trip/[a-z0-9-]+|checkout/[a-z0-9-]+)?(?:\?[^\r\n\\\\]*)?$#D',
+            '#^/(?:orders|profile|vehicles|announcements|announcement/[a-z0-9-]+|trip/[a-z0-9-]+|checkout/[a-z0-9-]+)?(?:\?[^\r\n\\\\]*)?$#D',
             $path,
         ) && strlen($path) <= 2048
             ? $path

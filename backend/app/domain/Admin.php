@@ -110,6 +110,9 @@ final class Admin
         if (in_array($resource, ['companies', 'centers', 'points'], true)) {
             $row['enabled'] = (int) (bool) ($in['enabled'] ?? true);
         }
+        if (in_array($resource, ['companies', 'vehicles'], true)) {
+            $row['image_url'] = Media::imageUrl($in['image_url'] ?? ($old['image_url'] ?? ''));
+        }
         if ($resource === 'companies') {
             $row['fare'] = Db::json(Fare::validate($in['fare'] ?? Db::data($old['fare'] ?? null)));
         }

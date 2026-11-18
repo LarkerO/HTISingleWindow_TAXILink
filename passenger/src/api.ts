@@ -22,6 +22,8 @@ export interface Offer {
   centerName: string;
   vehicleId: string;
   vehicleName: string;
+  companyImageUrl?: string;
+  vehicleImageUrl?: string;
   capacity: number;
   rules: { mode: string; payment: string };
   fare: { amountMinor: number; components: Record<string, number> };

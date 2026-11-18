@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NoticeBar from '../components/NoticeBar.vue';
 import { useRouter } from 'vue-router';
 import { user, requireLogin, report } from '../api';
 import { pickup, dropoff, selectPoint } from '../booking';
@@ -25,6 +26,7 @@ function swap() {
 }
 </script>
 <template>
+  <NoticeBar placement="booking" />
   <section class="welcome">
     <div class="eyebrow">A BETTER WAY TO GO</div>
     <p class="greeting">{{ user ? `你好，${user.username}` : '你好，旅人' }} <span>☀</span></p>

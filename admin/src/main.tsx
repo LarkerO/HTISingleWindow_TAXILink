@@ -1,3 +1,6 @@
+import AnnouncementsPage from './AnnouncementsPage';
+import MediaSettingsPage from './MediaSettingsPage';
+import MediaField from './MediaField';
 import { BlueMapSettingsPage } from './BlueMapSettingsPage';
 import { BlueMap } from './BlueMap';
 import InstallPage from './InstallPage';
@@ -56,6 +59,8 @@ import './style.css';
 
 type RecordData = Record<string, any>;
 const menus = [
+  { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
+  { path: '/media', name: 'COS 图片存储', icon: <SettingOutlined /> },
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
   { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/orders', name: '订单与调度', icon: <UnorderedListOutlined /> },
@@ -192,7 +197,7 @@ function AdminApp() {
         setPoints(p);
         setGroups(g);
         setScope(s.pointIds);
-      } else if (r === 'bluemap') {
+      } else if (['bluemap', 'announcements', 'media'].includes(r)) {
         setRows([]);
       } else if (r === 'fare') {
         const c = companies.find((c) => c.id === company);
@@ -608,6 +613,8 @@ function AdminApp() {
               '/system_logs',
               '/depot_authorizations',
               '/bluemap',
+              '/announcements',
+              '/media',
             ].includes(m.path),
         ),
       }}
@@ -977,6 +984,14 @@ function AdminApp() {
               </Col>
             </Row>
           </>
+        ) : page === '/announcements' ? (
+          user.platformAdmin ? (
+            <AnnouncementsPage />
+          ) : null
+        ) : page === '/media' ? (
+          user.platformAdmin ? (
+            <MediaSettingsPage />
+          ) : null
         ) : page === '/bluemap' ? (
           user.platformAdmin ? (
             <BlueMapSettingsPage />
@@ -1292,6 +1307,17 @@ function AdminApp() {
                     value: s.depotId + '|' + s.id,
                     label: `${catalog.depots?.find((d) => d.id === s.depotId)?.name || s.depotId} / ${s.id}`,
                   }))}
+              />
+            </Form.Item>
+          )}
+          {['companies', 'vehicles'].includes(resource) && (
+            <Form.Item
+              name="image_url"
+              label={resource === 'companies' ? '公司标志' : '车型示意图'}
+            >
+              <MediaField
+                purpose={resource === 'companies' ? 'company' : 'vehicle'}
+                company={company}
               />
             </Form.Item>
           )}

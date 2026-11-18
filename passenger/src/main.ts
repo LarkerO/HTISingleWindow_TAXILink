@@ -7,6 +7,8 @@ import './style.css';
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/announcements', component: () => import('./pages/Announcements.vue') },
+    { path: '/announcement/:id', component: () => import('./pages/Announcement.vue') },
     { path: '/', component: () => import('./pages/Home.vue') },
     { path: '/points/:which', component: () => import('./pages/Points.vue') },
     { path: '/vehicles', component: () => import('./pages/Vehicles.vue') },

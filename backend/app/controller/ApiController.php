@@ -1,7 +1,22 @@
 <?php
 declare(strict_types=1);
 namespace app\controller;
-use app\domain\{Admin, AppError, Auth, Booking, Bridge, Db, Dispatch, Env, Install, Portal, RateLimit, SystemLog};
+use app\domain\{
+    Announcements,
+    Media,
+    Admin,
+    AppError,
+    Auth,
+    Booking,
+    Bridge,
+    Db,
+    Dispatch,
+    Env,
+    Install,
+    Portal,
+    RateLimit,
+    SystemLog,
+};
 use support\{Request, Response};
 
 final class ApiController
@@ -35,7 +50,10 @@ final class ApiController
         }
         if ($method === 'GET' && $path === '/api/map-settings') {
             $map = Db::one('SELECT map_id,allow_3d FROM map_settings WHERE id=1');
-            return ['mapId' => $map['map_id'] ?? null, 'allow3d' => (bool) ($map['allow_3d'] ?? true)];
+            return [
+                'mapId' => $map['map_id'] ?? null,
+                'allow3d' => (bool) ($map['allow_3d'] ?? true),
+            ];
         }
         if ($method === 'GET' && $path === '/api/points') {
             $q = trim((string) $r->get('q', ''));
@@ -63,10 +81,15 @@ final class ApiController
                 'return_to' => Auth::returnPath((string) $r->get('returnTo', '/')),
                 'expires' => time() + 600,
             ]);
-            return redirect(Portal::authorize(
-                Env::get('PORTAL_ISSUER'), Env::get('PORTAL_CLIENT_ID'),
-                Auth::oauthRedirect($destination), $state, $verifier,
-            ))->withHeader('Set-Cookie', Auth::cookie('tl_oauth', $state, 600));
+            return redirect(
+                Portal::authorize(
+                    Env::get('PORTAL_ISSUER'),
+                    Env::get('PORTAL_CLIENT_ID'),
+                    Auth::oauthRedirect($destination),
+                    $state,
+                    $verifier,
+                ),
+            )->withHeader('Set-Cookie', Auth::cookie('tl_oauth', $state, 600));
         }
         if ($method === 'GET' && $path === '/api/auth/callback') {
             $state = (string) $r->get('state', '');
@@ -91,9 +114,12 @@ final class ApiController
                 throw new AppError('OAUTH_CODE_MISSING', 'Portal 回调缺少授权码，请重新登录', 400);
             }
             $profile = Portal::profile(
-                Env::get('PORTAL_ISSUER'), Env::get('PORTAL_CLIENT_ID'),
-                Env::get('PORTAL_CLIENT_SECRET'), Auth::oauthRedirect($entry['destination']),
-                $code, $entry['verifier'],
+                Env::get('PORTAL_ISSUER'),
+                Env::get('PORTAL_CLIENT_ID'),
+                Env::get('PORTAL_CLIENT_SECRET'),
+                Auth::oauthRedirect($entry['destination']),
+                $code,
+                $entry['verifier'],
             );
             $session = Auth::login($profile);
             return redirect(
@@ -133,22 +159,61 @@ final class ApiController
             $u = Auth::session($r, false);
             return ['user' => $u ? Auth::publicUser($u) : null, 'demo' => Env::demo()];
         }
+        if ($method === 'GET' && $path === '/api/announcements') {
+            return Announcements::listing(
+                Auth::session($r, false),
+                (string) $r->get('placement', ''),
+                (int) $r->get('page', 1),
+            );
+        }
+        if ($method === 'GET' && preg_match('#^/api/announcements/([a-z0-9-]+)$#D', $path, $m)) {
+            return Announcements::detail(Auth::session($r, false), $m[1]);
+        }
         $u = Auth::session($r);
         if ($method !== 'GET') {
             Auth::csrf($r, $u);
         }
         $input = $method === 'GET' ? [] : $r->post();
+        if ($method === 'GET' && $path === '/api/admin/media/settings') {
+            Auth::platform($u);
+            return Media::settings();
+        }
+        if ($method === 'POST' && $path === '/api/admin/media') {
+            RateLimit::check('media:' . $u['id'], 20);
+            return Media::upload(
+                $u,
+                (string) ($input['purpose'] ?? ''),
+                (string) ($input['companyId'] ?? ''),
+                $r->file('file'),
+            );
+        }
+        if (preg_match('#^/api/admin/announcements(?:/([a-z0-9-]+))?$#D', $path, $m)) {
+            Auth::platform($u);
+            if ($method === 'GET') {
+                return Db::all('SELECT * FROM announcements ORDER BY updated_at DESC,id DESC');
+            }
+            if ($method === 'POST' || $method === 'PATCH') {
+                return Announcements::save($u, $input, $m[1] ?? null);
+            }
+        }
         if ($method === 'POST' && $path === '/api/admin/map-settings') {
             Auth::platform($u);
             $mapId = $input['mapId'] ?? null;
             $allow3d = $input['allow3d'] ?? null;
-            if (!is_string($mapId) || !preg_match('/^[a-zA-Z0-9_-]{1,128}$/D', $mapId) || !is_bool($allow3d)) {
+            if (
+                !is_string($mapId) ||
+                !preg_match('/^[a-zA-Z0-9_-]{1,128}$/D', $mapId) ||
+                !is_bool($allow3d)
+            ) {
                 throw new AppError('VALIDATION', 'BlueMap 地图 ID 或 3D 设置无效', 422);
             }
             $upsert = Db::sqlite()
                 ? 'ON CONFLICT(id) DO UPDATE SET map_id=excluded.map_id, allow_3d=excluded.allow_3d'
                 : 'ON DUPLICATE KEY UPDATE map_id=VALUES(map_id), allow_3d=VALUES(allow_3d)';
-            Db::run('INSERT INTO map_settings (id,map_id,allow_3d) VALUES (1,?,?) ' . $upsert, [$mapId, (int) $allow3d]);
+            Db::run('INSERT INTO map_settings (id,map_id,allow_3d) VALUES (1,?,?) ' . $upsert, [
+                $mapId,
+                (int) $allow3d,
+            ]);
             return ['mapId' => $mapId, 'allow3d' => $allow3d];
         }
         if (!is_array($input)) {

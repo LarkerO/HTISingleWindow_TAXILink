@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NoticeBar from '../components/NoticeBar.vue';
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, user, requireLogin, report, refreshUser } from '../api';
@@ -32,6 +33,7 @@ async function logout() {
 }
 </script>
 <template>
+  <NoticeBar placement="profile" />
   <section class="welcome compact">
     <div class="eyebrow">YOUR PERSONAL SPACE</div>
     <h1>我的</h1>
@@ -70,6 +72,7 @@ async function logout() {
       ><span>{{ m.role === 'admin' ? '企业管理员' : '企业调度员' }}</span>
     </div>
   </section>
+  <RouterLink to="/announcements" class="announcement-item surface">公告中心 →</RouterLink>
   <p class="privacy-note">无需绑定游戏账号，也可以预约出行。</p>
   <button v-if="user" class="logout-button" @click="logout">退出登录</button>
 </template>

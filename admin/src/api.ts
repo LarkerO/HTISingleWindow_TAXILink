@@ -38,3 +38,24 @@ export const states: Record<string, string> = {
   CANCELLED: '已取消',
   FAILED: '失败',
 };
+
+export async function uploadImage(
+  file: File,
+  purpose: string,
+  companyId = '',
+): Promise<{ url: string }> {
+  if (file.size > 5 * 1024 * 1024) throw new Error('图片不能超过 5MB');
+  const body = new FormData();
+  body.append('file', file);
+  body.append('purpose', purpose);
+  body.append('companyId', companyId);
+  const response = await fetch('/api/admin/media', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'X-CSRF-Token': csrf },
+    body,
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error?.message || '上传失败');
+  return data;
+}

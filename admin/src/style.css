@@ -261,3 +261,28 @@ button {
     display: none;
   }
 }
+
+.markdown-body {
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+}
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-body pre {
+  overflow-x: auto;
+  padding: 16px;
+  background: #f4f7f6;
+  border-radius: 8px;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid #dce5e1;
+  padding: 8px;
+}

@@ -6,13 +6,22 @@ use PDO;
 final class Db
 {
     private static ?PDO $pdo = null;
-    public static function connect(string $dsn, string $user, string $password, array $options = []): PDO
-    {
-        return new PDO($dsn, $user, $password, $options + [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
+    public static function connect(
+        string $dsn,
+        string $user,
+        string $password,
+        array $options = [],
+    ): PDO {
+        return new PDO(
+            $dsn,
+            $user,
+            $password,
+            $options + [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                PDO::ATTR_EMULATE_PREPARES => false,
+            ],
+        );
     }
     public static function withConnection(PDO $connection, callable $action): mixed
     {
@@ -163,14 +172,32 @@ final class Db
                 'id VARCHAR(64) PRIMARY KEY, data TEXT NOT NULL, processed INTEGER NOT NULL DEFAULT 0, created_at BIGINT NOT NULL',
             'demo_rides' =>
                 'id VARCHAR(64) PRIMARY KEY, params TEXT NOT NULL, created_at BIGINT NOT NULL, departed_at BIGINT, destroyed INTEGER NOT NULL DEFAULT 0',
-            'map_settings' => 'id INTEGER PRIMARY KEY, map_id VARCHAR(128) NOT NULL, allow_3d INTEGER NOT NULL',
+            'map_settings' =>
+                'id INTEGER PRIMARY KEY, map_id VARCHAR(128) NOT NULL, allow_3d INTEGER NOT NULL',
+            'announcements' =>
+                'id VARCHAR(64) PRIMARY KEY, title VARCHAR(120) NOT NULL, markdown MEDIUMTEXT NOT NULL, placements TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0, listed INTEGER NOT NULL DEFAULT 1, login_required INTEGER NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL',
             'dispatch_sequence' => 'id INTEGER PRIMARY KEY, ticket BIGINT NOT NULL',
         ];
         if (self::sqlite()) {
-            $definitions['rate_limits'] = 'id VARCHAR(128) PRIMARY KEY, minute BIGINT NOT NULL, hits INTEGER NOT NULL';
+            $definitions['rate_limits'] =
+                'id VARCHAR(128) PRIMARY KEY, minute BIGINT NOT NULL, hits INTEGER NOT NULL';
         }
         foreach ($definitions as $table => $definition) {
             self::pdo()->exec("CREATE TABLE IF NOT EXISTS $table ($definition)");
+        }
+        foreach (['companies', 'vehicles'] as $table) {
+            $columns = self::sqlite()
+                ? array_column(self::all("PRAGMA table_info($table)"), 'name')
+                : array_column(
+                    self::all(
+                        'SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?',
+                        [$table],
+                    ),
+                    'COLUMN_NAME',
+                );
+            if (!in_array('image_url', $columns, true)) {
+                self::pdo()->exec("ALTER TABLE $table ADD COLUMN image_url TEXT");
+            }
         }
         // Multi-company quotes contain sampled rail geometry and can exceed MySQL TEXT's 64 KiB.
         if (!self::sqlite()) {
@@ -232,7 +259,9 @@ final class Db
             self::pdo()->exec('ALTER TABLE orders ADD COLUMN revision BIGINT NOT NULL DEFAULT 0');
         }
         if (!in_array('vehicle_pending', $columns, true)) {
-            self::pdo()->exec('ALTER TABLE orders ADD COLUMN vehicle_pending INTEGER NOT NULL DEFAULT 0');
+            self::pdo()->exec(
+                'ALTER TABLE orders ADD COLUMN vehicle_pending INTEGER NOT NULL DEFAULT 0',
+            );
         }
         if (!self::one('SELECT id FROM dispatch_sequence WHERE id=1')) {
             self::insert('dispatch_sequence', ['id' => 1, 'ticket' => 0]);
