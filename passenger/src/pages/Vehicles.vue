@@ -119,6 +119,7 @@ const fareLabels: Record<string, string> = {
   timeMinor: '时长费',
   pickupMinor: '接客调度费',
   returnMinor: '回库调度费',
+  roundingMinor: '整币取整补差',
 };
 onMounted(quote);
 </script>

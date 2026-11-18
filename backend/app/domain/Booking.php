@@ -21,8 +21,14 @@ final class Booking
             'SELECT c.* FROM companies c JOIN company_points p ON c.id=p.company_id JOIN company_points d ON c.id=d.company_id WHERE c.enabled=1 AND p.point_id=? AND d.point_id=?',
             [$pickup, $dropoff],
         );
-        $from = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id', [$pickup]);
-        $to = Db::all('SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id', [$dropoff]);
+        $from = Db::all(
+            'SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id',
+            [$pickup],
+        );
+        $to = Db::all(
+            'SELECT platform_id FROM point_platforms WHERE point_id=? ORDER BY platform_id',
+            [$dropoff],
+        );
         if (!$from || !$to) {
             throw new AppError('POINT_TRACK_REQUIRED', '上车点或下车点尚未配置停车轨道');
         }
@@ -31,7 +37,8 @@ final class Booking
         foreach ($companies as $company) {
             $rules = Fare::validate(Db::data($company['fare']));
             $vehicles = Db::all('SELECT * FROM vehicles WHERE company_id=? AND capacity>=?', [
-                $company['id'], $count,
+                $company['id'],
+                $count,
             ]);
             $found = false;
             foreach (
@@ -254,7 +261,9 @@ final class Booking
                 'state' => $prepay ? 'AWAITING_PAYMENT' : 'QUEUED',
                 'snapshot' => Db::json($snapshot),
                 'telemetry' => '{}',
-                'amount' => max(array_column(array_column($offers, 'fare'), 'amountMinor')),
+                'amount' => Fare::settlement(
+                    (int) max(array_column(array_column($offers, 'fare'), 'amountMinor')),
+                ),
                 'paid' => 0,
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -279,7 +288,7 @@ final class Booking
                     'offer' => Db::json($o),
                 ]);
             }
-            self::event($id, 'order.created', ['demonstration' => true]);
+            self::event($id, 'order.created', ['demonstration' => Env::demo()]);
             return self::passengerView($order);
         });
     }
@@ -291,7 +300,10 @@ final class Booking
         if ($view['state'] === 'COMPLETED') {
             $t['phase'] = 'COMPLETED';
         }
-        if ($view['state'] === 'COMPLETED' || in_array($stage, ['RETURNING', 'AWAITING_DISEMBARK'], true)) {
+        if (
+            $view['state'] === 'COMPLETED' ||
+            in_array($stage, ['RETURNING', 'AWAITING_DISEMBARK'], true)
+        ) {
             unset($t['position'], $t['speedKmh'], $t['etaDropoffSeconds'], $t['etaPickupSeconds']);
             $t['stage'] = $view['state'] === 'COMPLETED' ? 'COMPLETED' : 'WAITING_DROPOFF';
             $t['stageLabel'] = $view['state'] === 'COMPLETED' ? '已完成' : '等待下车';
@@ -305,10 +317,12 @@ final class Booking
 
     private static function passengerGeometry(array $geometry): array
     {
-        $geometry['legs'] = array_values(array_filter(
-            $geometry['legs'] ?? [],
-            static fn(array $leg): bool => $leg['stage'] !== 'RETURNING',
-        ));
+        $geometry['legs'] = array_values(
+            array_filter(
+                $geometry['legs'] ?? [],
+                static fn(array $leg): bool => $leg['stage'] !== 'RETURNING',
+            ),
+        );
         foreach ($geometry['legs'] as $leg) {
             if ($leg['stage'] !== 'ON_TRIP') {
                 continue;
@@ -325,11 +339,13 @@ final class Booking
                 $previous = end($points);
                 if ($previous && $previous[0] < $end) {
                     $ratio = ($end - $previous[0]) / ($point[0] - $previous[0]);
-                    $points[] = [$end,
+                    $points[] = [
+                        $end,
                         $previous[1] + ($point[1] - $previous[1]) * $ratio,
                         $previous[2] + ($point[2] - $previous[2]) * $ratio,
                         $previous[3] + ($point[3] - $previous[3]) * $ratio,
-                        null, null,
+                        null,
+                        null,
                     ];
                 }
                 break;
@@ -358,7 +374,7 @@ final class Booking
             'billingStarted' => isset($o['billing_started']) ? (int) $o['billing_started'] : null,
             'telemetry' => $t,
             'offers' => $snapshot['offers'],
-            'demonstration' => true,
+            'demonstration' => Env::demo(),
             'queueUntil' => (int) $o['queue_until'],
         ];
     }
@@ -383,6 +399,9 @@ final class Booking
     }
     public static function pay(array $user, string $id): array
     {
+        if (!Env::demo()) {
+            return Cashier::checkout($user, $id);
+        }
         return Db::tx(function () use ($user, $id) {
             Auth::order($user, $id);
             $o = Db::one('SELECT * FROM orders WHERE id=?' . Db::lock(), [$id]);

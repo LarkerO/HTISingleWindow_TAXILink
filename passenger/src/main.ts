@@ -7,6 +7,13 @@ import './style.css';
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/payment-return',
+      redirect: (to) =>
+        typeof to.query.orderId === 'string' && /^[a-f0-9]{32}$/.test(to.query.orderId)
+          ? '/checkout/' + to.query.orderId
+          : '/orders',
+    },
     { path: '/announcements', component: () => import('./pages/Announcements.vue') },
     { path: '/announcement/:id', component: () => import('./pages/Announcement.vue') },
     { path: '/', component: () => import('./pages/Home.vue') },

@@ -637,4 +637,31 @@ check(
         count(Db::all('SELECT id FROM payments WHERE order_id=?', [$earlyId])) === 1,
     '回库失败只结束车辆跟踪，已结算订单和退款保持不变',
 );
+check(
+    $mapRequest('GET', '/api/admin/cashier', $mapUser)->getStatusCode() === 403,
+    '普通乘客不能读取总商户配置',
+);
+check(
+    $mapRequest('POST', '/api/admin/cashier', $mapUser, ['enabled' => false])->getStatusCode() ===
+        403,
+    '普通乘客不能修改商户配置',
+);
+check(
+    $mapRequest('GET', '/api/admin/cashier/jade', $mapUser)->getStatusCode() === 403,
+    '非企业管理员不能读取公司商户配置',
+);
+$cashierSave = $mapRequest('POST', '/api/admin/cashier', $mapAdmin, [
+    'enabled' => false,
+    'privateKey' => 'test-private',
+    'keyId' => 'test-api-key',
+]);
+$cashierView = Db::data($cashierSave->rawBody());
+check(
+    $cashierSave->getStatusCode() === 200 &&
+        !isset($cashierView['privateKey'], $cashierView['keyId']) &&
+        $cashierView['privateKeyConfigured'],
+    '管理 API 保存商户但不返回私钥与 API Key',
+);
+$cashierRead = Db::data($mapRequest('GET', '/api/admin/cashier', $mapAdmin)->rawBody());
+check(!isset($cashierRead['privateKey'], $cashierRead['keyId']), '管理 API 读取配置不泄漏密钥');
 echo "\n$checks 项领域验证通过\n";

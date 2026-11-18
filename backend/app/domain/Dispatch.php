@@ -94,7 +94,12 @@ final class Dispatch
                 }
             } catch (AppError $e) {
                 if ($e->key === 'ORDER_NOT_FOUND' && $o['vehicle_pending']) {
-                    self::ingest($o['id'], 'reconcile.vehicle_missing', ['phase' => 'MISSING'], time() * 1000);
+                    self::ingest(
+                        $o['id'],
+                        'reconcile.vehicle_missing',
+                        ['phase' => 'MISSING'],
+                        time() * 1000,
+                    );
                     continue;
                 }
                 if ($e->key === 'ORDER_NOT_FOUND' && $o['state'] === 'CANCEL_REQUESTED') {
@@ -180,7 +185,7 @@ final class Dispatch
                         [
                             $c['id'],
                             $c['company_id'],
-                            $offer['fare']['amountMinor'],
+                            Fare::settlement((int) $offer['fare']['amountMinor']),
                             time(),
                             $o['id'],
                         ],
@@ -270,12 +275,14 @@ final class Dispatch
         if (in_array($o['state'], ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
             if ($o['vehicle_pending'] && $fresh) {
                 $telemetry = array_replace($telemetry, $data, ['_snapshotAt' => $snapshotAt]);
-                $vehicleDone = $type === 'reconcile.vehicle_missing' ||
-                    ($type === 'reconcile.final' && in_array(
-                        $data['phase'] ?? '',
-                        ['COMPLETED', 'DESTROYED', 'CANCELLED', 'FAILED', 'RECOVERED'],
-                        true,
-                    ));
+                $vehicleDone =
+                    $type === 'reconcile.vehicle_missing' ||
+                    ($type === 'reconcile.final' &&
+                        in_array(
+                            $data['phase'] ?? '',
+                            ['COMPLETED', 'DESTROYED', 'CANCELLED', 'FAILED', 'RECOVERED'],
+                            true,
+                        ));
                 Db::run(
                     'UPDATE orders SET revision=revision+1,telemetry=?,vehicle_pending=? WHERE id=?',
                     [Db::json($telemetry), (int) !$vehicleDone, $id],
@@ -313,12 +320,14 @@ final class Dispatch
             $state = 'ACTIVE';
         }
         $phase = $fresh ? $data['phase'] ?? '' : '';
-        $passengerDone = $type === 'reconcile.final' &&
+        $passengerDone =
+            $type === 'reconcile.final' &&
             $phase === 'ACTIVE' &&
             ($data['onboardCount'] ?? null) === 0 &&
             ($start !== null || ($data['stage'] ?? '') === 'RETURNING') &&
             (($data['stage'] ?? '') === 'RETURNING' ||
-                (($data['stage'] ?? '') === 'WAITING_DROPOFF' && ($telemetry['_everOnboard'] ?? false)));
+                (($data['stage'] ?? '') === 'WAITING_DROPOFF' &&
+                    ($telemetry['_everOnboard'] ?? false)));
         if ($phase !== '' && $o['candidate_id']) {
             Db::run(
                 "UPDATE candidates SET state=CASE WHEN id=? THEN 'SELECTED' ELSE 'CANCELLED' END WHERE order_id=? AND state='WAITING'",
@@ -401,16 +410,26 @@ final class Dispatch
                 $amount = $rules['noShowMinor'];
             }
         }
+        $amount = Fare::settlement($amount);
         Db::run(
             'UPDATE orders SET revision=revision+1,state=?,telemetry=?,billing_started=?,billing_ended=?,amount=?,updated_at=?,vehicle_pending=? WHERE id=?',
-            [$state, Db::json($telemetry), $start, $end, $amount, time(), (int) $passengerDone, $id],
+            [
+                $state,
+                Db::json($telemetry),
+                $start,
+                $end,
+                $amount,
+                time(),
+                (int) $passengerDone,
+                $id,
+            ],
         );
         if (in_array($state, ['COMPLETED', 'CANCELLED', 'FAILED'], true)) {
             Db::run(
                 "UPDATE candidates SET state='CANCELLED' WHERE order_id=? AND state='WAITING'",
                 [$id],
             );
-            if ((int) $o['paid'] > $amount) {
+            if (Env::demo() && (int) $o['paid'] > $amount) {
                 $refund = (int) $o['paid'] - $amount;
                 Db::insert('payments', [
                     'id' => Db::id(),
@@ -462,6 +481,7 @@ final class Dispatch
     }
     public static function finish(array $o, string $state, string $event, int $amount): void
     {
+        $amount = Fare::settlement($amount);
         $finish = static function () use ($o, $state, $event, $amount): void {
             $current = Db::one('SELECT * FROM orders WHERE id=?' . Db::lock(), [$o['id']]);
             if (!$current || $current['state'] !== $o['state']) {
@@ -476,7 +496,7 @@ final class Dispatch
                 [$o['id']],
             );
             Booking::event($o['id'], $event);
-            if ((int) $current['paid'] > $amount) {
+            if (Env::demo() && (int) $current['paid'] > $amount) {
                 Db::insert('payments', [
                     'id' => Db::id(),
                     'order_id' => $o['id'],

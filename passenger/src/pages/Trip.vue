@@ -206,7 +206,8 @@ const eta = computed(() => {
       >
     </div>
     <p class="booking-note">
-      支付仅演示<span v-if="!terminal">
+      {{ order.demonstration ? '支付仅演示' : '统一收银台结算'
+      }}<span v-if="!terminal">
         · {{ order.billingStarted ? '已开始计费' : '实际放行后开始计费' }} ·
         满员或超时也可能自动发车</span
       >

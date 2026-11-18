@@ -21,7 +21,7 @@ global $argv;
 return [
     'webman' => [
         'handler' => Http::class,
-        'listen' => app\domain\Env::listener('HTTP_LISTEN','http://127.0.0.1:8787'),
+        'listen' => app\domain\Env::listener('HTTP_LISTEN', 'http://127.0.0.1:8787'),
         'count' => 4,
         'user' => '',
         'group' => '',
@@ -32,36 +32,63 @@ return [
             'requestClass' => Request::class,
             'logger' => Log::channel('default'),
             'appPath' => app_path(),
-            'publicPath' => public_path()
-        ]
+            'publicPath' => public_path(),
+        ],
     ],
-    ...(!app\domain\Env::installMode() ? [
-    'dispatcher' => ['handler'=>app\process\Dispatcher::class,'count'=>1],
-    'passenger-stream' => ['handler'=>app\process\PassengerStream::class,'listen'=>app\domain\Env::listener('STREAM_LISTEN','websocket://127.0.0.1:8790'),'count'=>1],
-    ...(!app\domain\Env::demo() ? ['mod-gateway'=>['handler'=>app\process\ModGateway::class,'listen'=>app\domain\Env::listener('MOD_LISTEN','websocket://127.0.0.1:8788'),'count'=>1]] : []),
-    ] : []),
+    ...!app\domain\Env::installMode()
+        ? [
+            'cashier-reconciler' => [
+                'handler' => app\process\CashierReconciler::class,
+                'count' => 1,
+            ],
+            'dispatcher' => ['handler' => app\process\Dispatcher::class, 'count' => 1],
+            'passenger-stream' => [
+                'handler' => app\process\PassengerStream::class,
+                'listen' => app\domain\Env::listener('STREAM_LISTEN', 'websocket://127.0.0.1:8790'),
+                'count' => 1,
+            ],
+            ...!app\domain\Env::demo()
+                ? [
+                    'mod-gateway' => [
+                        'handler' => app\process\ModGateway::class,
+                        'listen' => app\domain\Env::listener(
+                            'MOD_LISTEN',
+                            'websocket://127.0.0.1:8788',
+                        ),
+                        'count' => 1,
+                    ],
+                ]
+                : [],
+        ]
+        : [],
     // File update detection and automatic reload
     'monitor' => [
         'handler' => app\process\Monitor::class,
         'reloadable' => false,
         'constructor' => [
             // Monitor these directories
-            'monitorDir' => array_merge([
-                app_path(),
-                config_path(),
-                base_path() . '/process',
-                base_path() . '/support',
-                base_path() . '/resource',
-                base_path() . '/.env',
-            ], glob(base_path() . '/plugin/*/app'), glob(base_path() . '/plugin/*/config'), glob(base_path() . '/plugin/*/api')),
+            'monitorDir' => array_merge(
+                [
+                    app_path(),
+                    config_path(),
+                    base_path() . '/process',
+                    base_path() . '/support',
+                    base_path() . '/resource',
+                    base_path() . '/.env',
+                ],
+                glob(base_path() . '/plugin/*/app'),
+                glob(base_path() . '/plugin/*/config'),
+                glob(base_path() . '/plugin/*/api'),
+            ),
             // Files with these suffixes will be monitored
-            'monitorExtensions' => [
-                'php', 'html', 'htm', 'env'
-            ],
+            'monitorExtensions' => ['php', 'html', 'htm', 'env'],
             'options' => [
-                'enable_file_monitor' => !app\domain\Env::installMode() && !in_array('-d', $argv) && DIRECTORY_SEPARATOR === '/',
+                'enable_file_monitor' =>
+                    !app\domain\Env::installMode() &&
+                    !in_array('-d', $argv) &&
+                    DIRECTORY_SEPARATOR === '/',
                 'enable_memory_monitor' => DIRECTORY_SEPARATOR === '/',
-            ]
-        ]
-    ]
+            ],
+        ],
+    ],
 ];

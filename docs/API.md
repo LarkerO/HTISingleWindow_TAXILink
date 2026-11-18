@@ -15,7 +15,7 @@ API 前缀 `/api`，JSON 请求/响应。同源部署，HttpOnly Cookie `tl_sess
 | POST       | `/orders`                           | `{quoteId,companyIds,vehicleId?}`；必需 `Idempotency-Key`     |
 | GET        | `/orders?page=1`                    | 本人订单，30 条/页                                            |
 | GET        | `/orders/{id}`                      | 本人订单与轨迹、遥测                                          |
-| GET        | `/orders/{id}/events`               | 本人订单动态、演示支付记录                                    |
+| GET        | `/orders/{id}/events`               | 本人订单动态、支付记录                                    |
 | POST       | `/orders/{id}/depart`               | 已在上车点时确认发车                                          |
 | POST       | `/orders/{id}/cancel`               | 提交取消请求                                                  |
 | POST       | `/orders/{id}/pay`                  | 演示付款/退款，不连接货币系统                                 |
@@ -41,3 +41,11 @@ resource：`companies`、`centers`、`vehicles`、`point_groups`、`points`、`m
 
 - `GET /api/map-settings` 返回公开的 `mapId` 和 `allow3d`。初次部署时 `mapId` 为 `null`，前端使用构建默认地图。
 - `POST /api/admin/map-settings` 接受 `mapId` 字符串和 `allow3d` 布尔值。需要平台管理员会话及 CSRF 请求头。
+
+## UnionCashier
+
+- `POST /api/orders/{id}/pay`：本人订单发起付款，响应订单视图及可选 `checkoutUrl`，前端直接跳转。
+- `POST /api/orders/{id}/payment-sync`：查询并确认到账、处理终态多付款退款，返回最新订单。需会话和 CSRF，不接受前端传入金额或付款状态。
+- `GET/POST /api/admin/cashier`：平台管理员读取/保存总商户。
+- `GET/POST /api/admin/cashier/{companyId}`：企业管理员或平台管理员读取/保存公司商户，调度员无权读取密钥配置。
+- 配置字段：`enabled`、`origin`、`merchant`、`keyId`、`privateKey`、`platformKey`、`environment`、`returnUrl`。读取不返回 API Key 与私钥，写入留空保留旧值。

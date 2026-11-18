@@ -42,6 +42,8 @@ export interface Geometry {
   legs?: { stage: string; startMeters: number; endMeters: number }[];
 }
 export interface Order {
+  checkoutUrl?: string;
+  demonstration?: boolean;
   id: string;
   revision: number;
   state: string;

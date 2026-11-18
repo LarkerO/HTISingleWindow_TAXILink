@@ -1,3 +1,4 @@
+import CashierSettingsPage from './CashierSettingsPage';
 import AnnouncementsPage from './AnnouncementsPage';
 import MediaSettingsPage from './MediaSettingsPage';
 import MediaField from './MediaField';
@@ -59,6 +60,7 @@ import './style.css';
 
 type RecordData = Record<string, any>;
 const menus = [
+  { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
   { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
   { path: '/media', name: 'COS 图片存储', icon: <SettingOutlined /> },
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
@@ -73,7 +75,7 @@ const menus = [
   { path: '/scope', name: '运营范围', icon: <EnvironmentOutlined /> },
   { path: '/fare', name: '计费规则', icon: <SettingOutlined /> },
   { path: '/memberships', name: '成员与身份', icon: <TeamOutlined /> },
-  { path: '/payments', name: '演示支付记录', icon: <SafetyCertificateOutlined /> },
+  { path: '/payments', name: '支付记录', icon: <SafetyCertificateOutlined /> },
   { path: '/audit_logs', name: '操作日志', icon: <SafetyCertificateOutlined /> },
 ];
 const companyPages = ['/centers', '/vehicles', '/scope', '/fare', '/memberships'];
@@ -197,7 +199,7 @@ function AdminApp() {
         setPoints(p);
         setGroups(g);
         setScope(s.pointIds);
-      } else if (['bluemap', 'announcements', 'media'].includes(r)) {
+      } else if (['bluemap', 'announcements', 'media', 'cashier'].includes(r)) {
         setRows([]);
       } else if (r === 'fare') {
         const c = companies.find((c) => c.id === company);
@@ -353,7 +355,7 @@ function AdminApp() {
     modal.confirm({
       title: '确认执行调度操作？',
       content:
-        '操作将记录审计日志。有人乘坐时取消需要先下车；模组重启后已回收的订单将按失败关闭，费用归零并生成演示退款。',
+        '操作将记录审计日志。有人乘坐时取消需要先下车；模组重启后已回收的订单将按失败关闭，费用归零并原路退款。',
       onOk: async () => {
         try {
           await api('/admin/orders/' + drawerOrder?.id + '/control', { action });
@@ -471,7 +473,12 @@ function AdminApp() {
               {
                 title: '类型',
                 dataIndex: 'kind',
-                valueEnum: { DEMO_PAY: { text: '演示付款' }, DEMO_REFUND: { text: '演示退款' } },
+                valueEnum: {
+                  CASHIER_PAY: { text: '收银台付款' },
+                  CASHIER_REFUND: { text: '收银台退款' },
+                  DEMO_PAY: { text: '演示付款' },
+                  DEMO_REFUND: { text: '演示退款' },
+                },
               },
               { title: '金额', dataIndex: 'amount', render: (_, r) => money(r.amount) },
               {
@@ -657,7 +664,7 @@ function AdminApp() {
       }}
       actionsRender={() => [
         <Tag key="demo" color="gold">
-          支付仅演示{demo ? ' · 演示数据' : ''}
+          {demo ? '演示数据 · 支付仅演示' : '统一收银台'}
         </Tag>,
       ]}
     >
@@ -988,6 +995,17 @@ function AdminApp() {
           user.platformAdmin ? (
             <AnnouncementsPage />
           ) : null
+        ) : page === '/cashier' ? (
+          <CashierSettingsPage
+            companies={companies
+              .filter(
+                (c) =>
+                  user.platformAdmin ||
+                  user.memberships.some((m) => m.company_id === c.id && m.role === 'admin'),
+              )
+              .map((c) => ({ id: String(c.id), name: String(c.name) }))}
+            platformAdmin={user.platformAdmin}
+          />
         ) : page === '/media' ? (
           user.platformAdmin ? (
             <MediaSettingsPage />
@@ -1065,7 +1083,7 @@ function AdminApp() {
         ) : page === '/fare' ? (
           <Card title="企业统一计费规则">
             <Alert
-              message="同一企业所有车辆中心使用此规则。金额以游戏币的分为单位，所有支付与退款仅演示。"
+              message="同一企业所有车辆中心使用此规则。金额以游戏币的分为单位，正式支付使用统一收银台。"
               type="info"
               showIcon
               style={{ marginBottom: 24 }}

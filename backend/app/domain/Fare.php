@@ -4,6 +4,10 @@ namespace app\domain;
 
 final class Fare
 {
+    public static function settlement(int $minor): int
+    {
+        return Env::demo() ? $minor : intdiv($minor + 99, 100) * 100;
+    }
     public static function defaults(): array
     {
         return [
@@ -58,11 +62,12 @@ final class Fare
                 (max(0, $return - $r['returnFreeMeters']) * $r['returnPerKmMinor']) / 1000,
             ),
         ];
+        $parts['roundingMinor'] = self::settlement(array_sum($parts)) - array_sum($parts);
         return [
             'amountMinor' => array_sum($parts),
             'components' => $parts,
             'currency' => 'GAME',
-            'demonstration' => true,
+            'demonstration' => Env::demo(),
         ];
     }
 }

@@ -8,6 +8,7 @@ use app\domain\{
     AppError,
     Auth,
     Booking,
+    Cashier,
     Bridge,
     Db,
     Dispatch,
@@ -46,7 +47,11 @@ final class ApiController
         $method = $r->method();
         if ($method === 'GET' && $path === '/api/health') {
             Db::one('SELECT 1');
-            return ['status' => 'ok', 'demo' => Env::demo(), 'payment' => 'demonstration'];
+            return [
+                'status' => 'ok',
+                'demo' => Env::demo(),
+                'payment' => Env::demo() ? 'demonstration' : 'union-cashier',
+            ];
         }
         if ($method === 'GET' && $path === '/api/map-settings') {
             $map = Db::one('SELECT map_id,allow_3d FROM map_settings WHERE id=1');
@@ -254,7 +259,11 @@ final class ApiController
             }
         }
         if (
-            preg_match('#^/api/orders/([a-z0-9-]+)(?:/(pay|depart|cancel|events))?$#D', $path, $m)
+            preg_match(
+                '#^/api/orders/([a-z0-9-]+)(?:/(pay|payment-sync|depart|cancel|events))?$#D',
+                $path,
+                $m,
+            )
         ) {
             $id = $m[1];
             $action = $m[2] ?? '';
@@ -273,6 +282,12 @@ final class ApiController
                     ];
                 }
                 return Booking::passengerView($o);
+            }
+            if ($method === 'POST' && $action === 'payment-sync') {
+                if (!Env::demo()) {
+                    Cashier::syncOrder($id);
+                }
+                return Booking::passengerView(Auth::order($u, $id));
             }
             if ($method === 'POST' && $action === 'pay') {
                 return Booking::pay($u, $id);
@@ -329,6 +344,22 @@ final class ApiController
                 $args,
             );
             return array_map('intval', $counts) + ['mod' => Bridge::connectionStatus()];
+        }
+        if (preg_match('#^/api/admin/cashier(?:/([a-z0-9-]+))?$#D', $path, $m)) {
+            $scope = $m[1] ?? 'default';
+            if ($scope === 'default') {
+                Auth::platform($u);
+            } else {
+                Auth::company($u, $scope, true);
+            }
+            if ($method === 'GET') {
+                return Cashier::settings($scope);
+            }
+            if ($method === 'POST') {
+                $result = Cashier::save($scope, $input);
+                Admin::audit($u, 'cashier.updated', $scope, ['enabled' => $result['enabled']]);
+                return $result;
+            }
         }
         if (
             $method === 'POST' &&

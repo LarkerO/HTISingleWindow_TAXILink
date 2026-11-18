@@ -7,7 +7,7 @@
 | 浏览器入口 | 本机 HTTP，可选端口 | 独立 HTTPS 域名 |
 | 数据库 | 向导创建 SQLite | 预建专用空 MySQL 8 库 |
 | 限流 | SQLite，共享计数 | Redis |
-| 业务 | Portal、企业权限、调度、WebSocket、SM2、演示支付 | 同左 |
+| 业务 | Portal、企业权限、调度、WebSocket、SM2、支付 | 同左 |
 
 浏览器向导供尚无 `backend/.env`、外部 `DB_DSN` 和安装配置的实例使用。已有数据的站点走升级流程。只想体验界面可使用 README 的[演示模式](../README.md#快速体验)。
 
