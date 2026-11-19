@@ -1,5 +1,7 @@
 # TAXILink 部署指南
 
+使用 1Panel / OpenResty 时，参见 [Docker Compose 部署说明](DEPLOYMENT_1PANEL.md)，支持复用面板数据库或独立 MySQL、Redis。
+
 [本机测试安装](#本机测试安装) · [生产安装](#生产安装) · [Portal 配置](#hydcraft-portal-配置) · [目录权限](#服务账号与目录权限) · [模组接入](#sm2-与模组接入) · [更新与验收](#更新备份与验收)
 
 | | 本机测试安装 | 生产安装 |

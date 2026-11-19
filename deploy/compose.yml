@@ -1,0 +1,42 @@
+name: taxilink
+
+services:
+  backend:
+    build:
+      context: ../backend
+    image: taxilink-backend:local
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      TZ: Asia/Shanghai
+      APP_ENV: production
+      DEMO_MODE: '0'
+      APP_SECURE_COOKIE: '1'
+      HTTP_LISTEN: http://0.0.0.0:8787
+      STREAM_LISTEN: websocket://0.0.0.0:8790
+      MOD_LISTEN: websocket://0.0.0.0:8788
+      TAXILINK_OPENSSL: /usr/bin/openssl
+      CASHIER_OPENSSL: /usr/bin/openssl
+    volumes:
+      - runtime:/app/runtime
+      - installation:/app/installation
+    networks:
+      default: {}
+      ingress:
+        aliases:
+          - taxilink-backend
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+networks:
+  ingress:
+    external: true
+    name: ${TAXILINK_NETWORK:-taxilink-ingress}
+
+volumes:
+  runtime:
+  installation:

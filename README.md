@@ -79,6 +79,7 @@ npm run test:e2e        # 需先启动后端和两个 Vite 开发服务
 ## 项目文档
 
 - [部署与权限指南](docs/DEPLOYMENT.md) · 安装模式、PowerShell 命令、Portal 回调、Linux 权限、模组接入与升级。
+- [1Panel / OpenResty 与 Docker Compose](docs/DEPLOYMENT_1PANEL.md) · 后端容器、前端静态站点、共享网络、数据库与备份升级。
 - [架构与业务规则](docs/ARCHITECTURE.md) · 调度、订单、结算与多端关系。
 - [接口说明](docs/API.md) · HTTP API 与 WebSocket。
 

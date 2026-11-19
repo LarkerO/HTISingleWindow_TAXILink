@@ -1,0 +1,48 @@
+# 复制到乘客站的 server 块内；保留 1Panel 生成的 TLS、域名与 root 配置。
+# 两站都需要 /api/、上传限制、/bluemap/ 与 SPA 回退。
+# 管理站可省略 /ws 和 /taxilink。删除面板中重复的 location /。
+# 使用变量解析 Docker DNS，后端暂时停止时不阻止 OpenResty 加载配置。
+resolver 127.0.0.11 valid=10s ipv6=off;
+set $taxilink_backend taxilink-backend;
+client_max_body_size 256k;
+
+location = /api/admin/media {
+    client_max_body_size 6m;
+    proxy_read_timeout 60s;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass http://$taxilink_backend:8787;
+}
+location /api/ {
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_pass http://$taxilink_backend:8787;
+}
+location = /ws {
+    proxy_pass http://$taxilink_backend:8790;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+    proxy_buffering off;
+}
+location = /taxilink {
+    proxy_pass http://$taxilink_backend:8788;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header X-TAXILink-Proof $http_x_taxilink_proof;
+    proxy_read_timeout 120s;
+    proxy_buffering off;
+}
+# 替换为 OpenResty 容器可达的 BlueMap 地址；尾部 / 用于移除 /bluemap/ 前缀。
+location /bluemap/ {
+    proxy_pass http://BLUEMAP_HOST:8100/;
+    proxy_set_header Cookie "";
+}
+location / {
+    try_files $uri $uri/ /index.html;
+}
