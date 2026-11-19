@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Card, Form, Input, Select, Space, Spin, Typography } from 'antd';
 
 type Status = {
   state: 'setup' | 'restart' | 'installed';
   requirements: Record<string, boolean>;
   local: boolean;
+  databaseDrivers?: string[];
 };
 
 const adminOrigin = window.location.origin;
@@ -39,6 +40,8 @@ const diagnostic = [
   .join(' · ');
 
 export default function InstallPage() {
+  const [form] = Form.useForm();
+  const dbDriver = Form.useWatch('dbDriver', form) ?? 'mysql';
   const [status, setStatus] = useState<Status>();
   const [failure, setFailure] = useState(initialError ? errors[initialError] : undefined);
   const [busy, setBusy] = useState(false);
@@ -125,11 +128,13 @@ export default function InstallPage() {
                 </Button>
               </div>
               <Form
+                form={form}
                 layout="vertical"
                 requiredMark={false}
                 autoComplete="off"
                 onFinish={start}
                 initialValues={{
+                  dbDriver: 'mysql',
                   dbHost: '127.0.0.1',
                   dbPort: '3306',
                   dbName: 'taxilink',
@@ -174,12 +179,42 @@ export default function InstallPage() {
                   <>
                     <Typography.Title level={4}>数据库与 Redis</Typography.Title>
                     <Typography.Paragraph>
-                      请先在 MySQL 创建专用空数据库和账号。
+                      请先创建专用空数据库和账号。PostgreSQL 使用 public schema，账号需要建表权限。
                     </Typography.Paragraph>
+                    <Form.Item label="数据库类型" name="dbDriver" rules={[{ required: true }]}>
+                      <Select
+                        options={[
+                          {
+                            value: 'mysql',
+                            label: 'MySQL',
+                            disabled:
+                              status.databaseDrivers !== undefined &&
+                              !status.databaseDrivers.includes('mysql'),
+                          },
+                          {
+                            value: 'pgsql',
+                            label: 'PostgreSQL',
+                            disabled:
+                              status.databaseDrivers !== undefined &&
+                              !status.databaseDrivers.includes('pgsql'),
+                          },
+                        ]}
+                        onChange={(value) =>
+                          form.setFieldsValue({ dbPort: value === 'pgsql' ? '5432' : '3306' })
+                        }
+                      />
+                    </Form.Item>
+                    {status.databaseDrivers !== undefined &&
+                      !status.databaseDrivers.includes(dbDriver) && (
+                        <Alert
+                          type="warning"
+                          message="请选择已安装 PDO 扩展的数据库类型，或为后端 PHP CLI 安装对应扩展并重启。"
+                        />
+                      )}
                     {(
                       [
-                        ['dbHost', 'MySQL 主机'],
-                        ['dbPort', 'MySQL 端口'],
+                        ['dbHost', '数据库主机'],
+                        ['dbPort', '数据库端口'],
                         ['dbName', '数据库名称'],
                         ['dbUser', '数据库账号'],
                         ['dbPassword', '数据库密码'],
@@ -225,7 +260,11 @@ export default function InstallPage() {
                   htmlType="submit"
                   loading={busy}
                   disabled={
-                    !validOrigin || Object.values(status.requirements).some((passed) => !passed)
+                    !validOrigin ||
+                    Object.values(status.requirements).some((passed) => !passed) ||
+                    (!status.local &&
+                      status.databaseDrivers !== undefined &&
+                      !status.databaseDrivers.includes(dbDriver))
                   }
                 >
                   验证配置并前往 Portal 登录

@@ -62,8 +62,9 @@ final class ApiController
         }
         if ($method === 'GET' && $path === '/api/points') {
             $q = trim((string) $r->get('q', ''));
+            $like = Db::pgsql() ? 'ILIKE' : 'LIKE';
             $items = Db::all(
-                'SELECT * FROM points WHERE enabled=1 AND (name LIKE ? OR description LIKE ?) ORDER BY name',
+                "SELECT * FROM points WHERE enabled=1 AND (name $like ? OR description $like ?) ORDER BY name",
                 ['%' . $q . '%', '%' . $q . '%'],
             );
             return [
@@ -212,9 +213,10 @@ final class ApiController
             ) {
                 throw new AppError('VALIDATION', 'BlueMap 地图 ID 或 3D 设置无效', 422);
             }
-            $upsert = Db::sqlite()
-                ? 'ON CONFLICT(id) DO UPDATE SET map_id=excluded.map_id, allow_3d=excluded.allow_3d'
-                : 'ON DUPLICATE KEY UPDATE map_id=VALUES(map_id), allow_3d=VALUES(allow_3d)';
+            $upsert =
+                Db::sqlite() || Db::pgsql()
+                    ? 'ON CONFLICT(id) DO UPDATE SET map_id=excluded.map_id, allow_3d=excluded.allow_3d'
+                    : 'ON DUPLICATE KEY UPDATE map_id=VALUES(map_id), allow_3d=VALUES(allow_3d)';
             Db::run('INSERT INTO map_settings (id,map_id,allow_3d) VALUES (1,?,?) ' . $upsert, [
                 $mapId,
                 (int) $allow3d,

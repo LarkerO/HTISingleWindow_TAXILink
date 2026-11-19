@@ -4,7 +4,7 @@
 
 | 应用     | 技术                                          | 开发地址                |
 | -------- | --------------------------------------------- | ----------------------- |
-| 总后端   | webman 2 / Workerman 5、PDO、MySQL 8、Redis   | `http://localhost:8787` |
+| 总后端   | webman 2 / Workerman 5、PDO、MySQL 8 / PostgreSQL 14+、Redis   | `http://localhost:8787` |
 | 运营管理 | React 19、Vite、Ant Design 6、ProComponents 3 | `http://localhost:5174` |
 | 乘客端   | Vue 3、Vite、TDesign Mobile                   | `http://localhost:5173` |
 
@@ -16,7 +16,7 @@ ProComponents 使用 npm 实际发布且支持 Ant Design 6 的 `3.1.15-9` 版�
 | --- | --- | --- |
 | 本地演示 | SQLite、演示账号、模拟模组 | [快速体验](#快速体验) |
 | 本机联调 | SQLite、HydCraft Portal、真实 SM2 模组网关 | [本机测试安装](docs/DEPLOYMENT.md#本机测试安装) |
-| 正式部署 | MySQL、Redis、HTTPS、HydCraft Portal | [生产安装](docs/DEPLOYMENT.md#生产安装) |
+| 正式部署 | MySQL / PostgreSQL、Redis、HTTPS、HydCraft Portal | [生产安装](docs/DEPLOYMENT.md#生产安装) |
 
 Windows PowerShell 生成安装码：在项目根目录安装 Composer 依赖后，运行 `php .\backend\bin\console.php install-code`。使用与启动后端相同的 Windows 账号。安装码适用于未配置的实例；请先在单独目录准备全新实例，再验证浏览器安装流程。
 

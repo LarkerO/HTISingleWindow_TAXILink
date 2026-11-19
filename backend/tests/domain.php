@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-putenv('DB_DSN=sqlite::memory:');
+putenv('DB_DSN=' . (getenv('TAXILINK_TEST_DB_DSN') ?: 'sqlite::memory:'));
 putenv('DEMO_MODE=1');
 putenv('APP_ENV=test');
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -48,6 +48,23 @@ $mapRequest = static function (
     );
 };
 $mapSettings = ['mapId' => 'heishan7_0', 'allow3d' => false];
+Db::insert('points', [
+    'id' => 'search-case',
+    'name' => 'Airport TAXI',
+    'description' => 'Terminal ONE',
+    'enabled' => 1,
+]);
+$search = Db::data($mapRequest('GET', '/api/points?q=airport')->rawBody());
+check(
+    count($search['items']) === 1 && $search['items'][0]['id'] === 'search-case',
+    '站点名称搜索不区分英文大小写',
+);
+$search = Db::data($mapRequest('GET', '/api/points?q=terminal')->rawBody());
+check(
+    count($search['items']) === 1 && $search['items'][0]['id'] === 'search-case',
+    '站点描述搜索不区分英文大小写',
+);
+Db::run('DELETE FROM points WHERE id=?', ['search-case']);
 $publicMap = '/api/map-settings';
 $adminMap = '/api/admin/map-settings';
 check(

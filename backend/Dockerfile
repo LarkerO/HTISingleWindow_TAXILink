@@ -1,6 +1,6 @@
 FROM php:8.4-cli-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libsqlite3-dev libonig-dev openssl unzip \
-    && docker-php-ext-install pdo_mysql pdo_sqlite pcntl posix mbstring curl \
+RUN apt-get update && apt-get install -y --no-install-recommends libcurl4-openssl-dev libsqlite3-dev libpq-dev libonig-dev openssl unzip \
+    && docker-php-ext-install pdo_mysql pdo_pgsql pdo_sqlite pcntl posix mbstring curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /app

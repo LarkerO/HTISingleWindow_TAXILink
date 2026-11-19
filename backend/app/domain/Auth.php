@@ -52,10 +52,14 @@ final class Auth
             );
         }
     }
-    public static function cookie(string $name, string $value, int $maxAge, ?bool $secure = null): string
-    {
+    public static function cookie(
+        string $name,
+        string $value,
+        int $maxAge,
+        ?bool $secure = null,
+    ): string {
         return "$name=$value; Path=/; HttpOnly; SameSite=Lax; Max-Age=$maxAge" .
-            (($secure ?? (Env::get('APP_SECURE_COOKIE') === '1')) ? '; Secure' : '');
+            ($secure ?? Env::get('APP_SECURE_COOKIE') === '1' ? '; Secure' : '');
     }
     public static function validateProfile(array $profile): array
     {
@@ -89,9 +93,10 @@ final class Auth
             // Atomic create-or-find preserves one identity across simultaneous passenger/admin callbacks.
             $sql =
                 'INSERT INTO users (id,portal_sub,username,avatar,first_login,platform_admin) VALUES (?,?,?,?,?,?)';
-            $sql .= Db::sqlite()
-                ? ' ON CONFLICT(portal_sub) DO NOTHING'
-                : ' ON DUPLICATE KEY UPDATE portal_sub=portal_sub';
+            $sql .=
+                Db::sqlite() || Db::pgsql()
+                    ? ' ON CONFLICT(portal_sub) DO NOTHING'
+                    : ' ON DUPLICATE KEY UPDATE portal_sub=portal_sub';
             Db::run($sql, [
                 Db::id(),
                 $profile['sub'],

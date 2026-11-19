@@ -7,7 +7,7 @@
 | | 本机测试安装 | 生产安装 |
 | --- | --- | --- |
 | 浏览器入口 | 本机 HTTP，可选端口 | 独立 HTTPS 域名 |
-| 数据库 | 向导创建 SQLite | 预建专用空 MySQL 8 库 |
+| 数据库 | 向导创建 SQLite | 预建专用空 MySQL 8 或 PostgreSQL 14+ 库 |
 | 限流 | SQLite，共享计数 | Redis |
 | 业务 | Portal、企业权限、调度、WebSocket、SM2、支付 | 同左 |
 
@@ -15,7 +15,7 @@
 
 ## 先准备依赖
 
-需要 PHP 8.2+ CLI、curl、mbstring、对应的 PDO 驱动、Composer、Node.js 22.12+ 和 OpenSSL 3 命令行。Linux 还需要 pcntl 和 posix。以下命令均在项目根目录运行：
+需要 PHP 8.2+ CLI、curl、mbstring、对应的 PDO 驱动（MySQL 为 pdo_mysql，PostgreSQL 为 pdo_pgsql）、Composer、Node.js 22.12+ 和 OpenSSL 3 命令行。Linux 还需要 pcntl 和 posix。以下命令均在项目根目录运行：
 
 ```text
 composer install --working-dir=backend --no-dev --optimize-autoloader
@@ -72,6 +72,8 @@ Windows 和 Linux 均可使用此流程。安装和运行使用同一个普通�
 
 以下按 Linux + Nginx 部署。
 
+默认步骤使用 MySQL；选择 PostgreSQL 时，第 2 步的建库命令替换为下方[使用 PostgreSQL](#使用-postgresql)的说明。
+
 1. 将项目部署到 `/srv/taxilink`，为管理端和乘客端分别准备 HTTPS 域名。安装依赖后，在项目根目录运行 `npm run build`，产物位于 `admin/dist` 和 `passenger/dist`。
 2. 在 MySQL 中创建专用空库和账号，替换示例密码：
 
@@ -116,6 +118,50 @@ WantedBy=multi-user.target
 ```
 
 执行 `sudo systemctl daemon-reload` 和 `sudo systemctl enable --now taxilink`。通过 `sudo journalctl -u taxilink -n 100 --no-pager` 查看日志。
+
+### 使用 PostgreSQL
+
+生产安装也可选择 PostgreSQL 14+。无需 Docker，PHP 后端仍由 systemd 启动，前端静态目录与 OpenResty 配置不变。在 1Panel 创建 UTF8 编码的专用空库和账号，确保账号可以连接数据库并在 public schema 中建表。也可由数据库管理员执行（替换密码）：
+
+```sql
+CREATE ROLE taxilink LOGIN PASSWORD '替换为独立强密码';
+CREATE DATABASE taxilink OWNER taxilink ENCODING 'UTF8' TEMPLATE template0;
+```
+
+使用已有数据库时，连接到目标库后授权：
+
+```sql
+GRANT CONNECT ON DATABASE taxilink TO taxilink;
+GRANT USAGE, CREATE ON SCHEMA public TO taxilink;
+```
+
+在管理端 `/install` 选择 PostgreSQL，默认端口为 5432，填写实际主机、端口、数据库名、账号和密码，后续 Portal、Redis、SM2 流程相同。安装要求只需具备所选数据库的 PDO 扩展；安装扩展后重启 PHP CLI 后端。后端与数据库同机时优先使用实际可达的本机地址及映射端口；远程连接还需配置 PostgreSQL 的监听地址、pg_hba.conf 和网络放行。
+
+手动配置时设置：
+
+```dotenv
+DB_DSN=pgsql:host=127.0.0.1;port=5432;dbname=taxilink;sslmode=prefer;connect_timeout=3
+DB_USER=taxilink
+DB_PASSWORD=自行设置
+```
+
+其余生产配置保持一致，运行 `php backend/bin/console.php migrate` 后启动。安装向导默认使用 public schema（账号的默认 current_schema 应为 public），不支持在一个 schema 混放其他应用表。向导连接使用 sslmode=prefer；需要强制验证远程服务器证书时，通过手动配置的 DSN 设置 sslmode=verify-full 和 sslrootcert。浏览器安装实例的业务配置保存在 installation/config.json，不应同时用另一份 .env 覆盖它。
+
+此适配支持空库初始化及同数据库类型的结构升级，不自动搬运 MySQL 已有数据。已有生产数据改用 PostgreSQL 前，需另做数据迁移与核对，不能只更改 DSN。Redis 仍是生产必需依赖。
+
+### 数据库对照验证
+
+`npm run test:database` 使用真实 MySQL 或 PostgreSQL，依次创建随机命名的 taxilink_test_* 临时数据库，运行安装/升级/锁/并发登录与下单契约、领域回归、收银台与 OAuth 协议夹具，再删除临时库。传入的管理库不运行夹具、不删表；测试账号需要创建和删除数据库的权限。仅在专用测试实例运行：
+
+```bash
+TAXILINK_TEST_ADMIN_DSN='pgsql:host=127.0.0.1;port=5432;dbname=postgres' \
+  DB_USER=测试管理员 DB_PASSWORD=测试密码 npm run test:database
+# 对照 MySQL 时将管理 DSN 改为 mysql:host=127.0.0.1;port=3306;dbname=mysql
+```
+
+默认 `npm test` 继续使用 SQLite，不依赖外部数据库。收银台测试使用本地支付协议夹具，不向真实支付平台发起扣款。
+
+2026-11-19 本地对照：Windows / PHP 8.5.12，PostgreSQL 17.11 与 MySQL 8.4.13 均通过上述数据库契约、80 项领域验证、16 项收银台验证及 7 项 OAuth 测试；SQLite 领域与首次初始化回归、两端类型检查及生产构建通过。此记录不代替生产 Linux 环境、真实 Portal 和游戏服的上线联调。
 
 ## 服务账号与目录权限
 

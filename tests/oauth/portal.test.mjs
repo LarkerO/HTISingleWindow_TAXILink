@@ -113,7 +113,7 @@ test('HydCraft Portal OAuth 端到端协议契约', { timeout: 60000 }, async (t
     DEMO_MODE: '0',
     REDIS_URL: '',
     APP_SECURE_COOKIE: '1',
-    DB_DSN: 'sqlite:' + join(directory, 'oauth.sqlite'),
+    DB_DSN: process.env.TAXILINK_TEST_DB_DSN || 'sqlite:' + join(directory, 'oauth.sqlite'),
     PLATFORM_ADMIN_SUB: '',
     APP_ORIGIN: 'https://taxi.test',
     ADMIN_ORIGIN: 'https://admin.taxi.test',

@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-putenv('DB_DSN=sqlite::memory:');
+putenv('DB_DSN=' . (getenv('TAXILINK_TEST_DB_DSN') ?: 'sqlite::memory:'));
 putenv('DEMO_MODE=1');
 putenv('APP_ENV=test');
 require dirname(__DIR__) . '/vendor/autoload.php';

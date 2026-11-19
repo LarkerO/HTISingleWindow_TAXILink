@@ -64,7 +64,26 @@ final class Db
     }
     public static function sqlite(): bool
     {
-        return self::$pdo?->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+        return self::pdo()->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
+    }
+    public static function pgsql(): bool
+    {
+        return self::pdo()->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql';
+    }
+    private static function columns(string $table): array
+    {
+        if (self::sqlite()) {
+            return array_column(self::all("PRAGMA table_info($table)"), 'name');
+        }
+        return array_column(
+            self::all(
+                'SELECT column_name AS name FROM information_schema.columns WHERE table_schema=' .
+                    (self::pgsql() ? 'current_schema()' : 'DATABASE()') .
+                    ' AND table_name=?',
+                [$table],
+            ),
+            'name',
+        );
     }
     public static function run(string $sql, array $args = []): \PDOStatement
     {
@@ -186,24 +205,23 @@ final class Db
                 'id VARCHAR(128) PRIMARY KEY, minute BIGINT NOT NULL, hits INTEGER NOT NULL';
         }
         foreach ($definitions as $table => $definition) {
+            if (self::pgsql()) {
+                $definition = str_replace(
+                    ['MEDIUMTEXT', 'DOUBLE '],
+                    ['TEXT', 'DOUBLE PRECISION '],
+                    $definition,
+                );
+            }
             self::pdo()->exec("CREATE TABLE IF NOT EXISTS $table ($definition)");
         }
         foreach (['companies', 'vehicles'] as $table) {
-            $columns = self::sqlite()
-                ? array_column(self::all("PRAGMA table_info($table)"), 'name')
-                : array_column(
-                    self::all(
-                        'SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?',
-                        [$table],
-                    ),
-                    'COLUMN_NAME',
-                );
+            $columns = self::columns($table);
             if (!in_array('image_url', $columns, true)) {
                 self::pdo()->exec("ALTER TABLE $table ADD COLUMN image_url TEXT");
             }
         }
         // Multi-company quotes contain sampled rail geometry and can exceed MySQL TEXT's 64 KiB.
-        if (!self::sqlite()) {
+        if (self::pdo()->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
             foreach (
                 [
                     'quotes' => ['offers'],
@@ -234,25 +252,11 @@ final class Db
                 }
             }
         }
-        $oauthColumns = self::sqlite()
-            ? array_column(self::all('PRAGMA table_info(oauth_states)'), 'name')
-            : array_column(
-                self::all(
-                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='oauth_states'",
-                ),
-                'COLUMN_NAME',
-            );
+        $oauthColumns = self::columns('oauth_states');
         if (!in_array('return_to', $oauthColumns, true)) {
             self::pdo()->exec('ALTER TABLE oauth_states ADD COLUMN return_to TEXT');
         }
-        $columns = self::sqlite()
-            ? array_column(self::all('PRAGMA table_info(orders)'), 'name')
-            : array_column(
-                self::all(
-                    "SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='orders'",
-                ),
-                'COLUMN_NAME',
-            );
+        $columns = self::columns('orders');
         if (!in_array('queue_ticket', $columns, true)) {
             self::pdo()->exec(
                 'ALTER TABLE orders ADD COLUMN queue_ticket BIGINT NOT NULL DEFAULT 0',
@@ -282,7 +286,7 @@ final class Db
             as $table => $columns
         ) {
             $name = 'idx_' . $table;
-            if (self::sqlite()) {
+            if (self::sqlite() || self::pgsql()) {
                 self::pdo()->exec("CREATE INDEX IF NOT EXISTS $name ON $table ($columns)");
             } elseif (
                 !self::one(

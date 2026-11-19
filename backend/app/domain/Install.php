@@ -43,6 +43,9 @@ final class Install
                     : 'installed',
                 'requirements' => Env::configured() ? [] : self::requirements(),
                 'local' => self::local(),
+                'databaseDrivers' => array_values(
+                    array_intersect(['mysql', 'pgsql'], \PDO::getAvailableDrivers()),
+                ),
             ];
         }
         self::requireOpen();
@@ -85,11 +88,9 @@ final class Install
         }
         return $cached = [
             'PHP 8.2+' => PHP_VERSION_ID >= 80200,
-            self::local() ? 'PDO SQLite' : 'PDO MySQL' => in_array(
-                self::local() ? 'sqlite' : 'mysql',
-                \PDO::getAvailableDrivers(),
-                true,
-            ),
+            self::local() ? 'PDO SQLite' : 'PDO MySQL / PostgreSQL（至少一种）' => self::local()
+                ? in_array('sqlite', \PDO::getAvailableDrivers(), true)
+                : (bool) array_intersect(['mysql', 'pgsql'], \PDO::getAvailableDrivers()),
             'curl / mbstring' => extension_loaded('curl') && extension_loaded('mbstring'),
             'pcntl / posix (Linux)' =>
                 PHP_OS_FAMILY === 'Windows' ||
@@ -103,7 +104,8 @@ final class Install
     private static function openssl(): string
     {
         if (PHP_OS_FAMILY === 'Windows' && Env::get('TAXILINK_OPENSSL') === '') {
-            $bundled = Env::get('ProgramFiles', 'C:\\Program Files') . '\\Git\\usr\\bin\\openssl.exe';
+            $bundled =
+                Env::get('ProgramFiles', 'C:\\Program Files') . '\\Git\\usr\\bin\\openssl.exe';
             if (is_file($bundled)) {
                 return $bundled;
             }
@@ -176,7 +178,7 @@ final class Install
                 'INSTALL_DB_FAILED',
                 $local
                     ? 'SQLite 打开失败，请检查安装目录权限'
-                    : 'MySQL 连接或读取失败，请检查地址、库名和账号权限',
+                    : '数据库连接或读取失败，请检查地址、库名和账号权限',
                 422,
             );
         }
@@ -222,15 +224,25 @@ final class Install
             );
         }
         $host = self::value($body, 'dbHost', '/^[a-zA-Z0-9.-]+$/D');
+        $driver = $body['dbDriver'] ?? 'mysql';
+        if (!in_array($driver, ['mysql', 'pgsql'], true)) {
+            throw new AppError('INSTALL_INPUT_INVALID', '不支持的数据库类型', 422);
+        }
+        if (!in_array($driver, \PDO::getAvailableDrivers(), true)) {
+            throw new AppError('INSTALL_INPUT_INVALID', "PHP CLI 未安装 pdo_$driver 扩展", 422);
+        }
         $database = self::value($body, 'dbName', '/^[a-zA-Z0-9_]+$/D');
         $port = filter_var($body['dbPort'] ?? null, FILTER_VALIDATE_INT, [
             'options' => ['min_range' => 1, 'max_range' => 65535],
         ]);
         if ($port === false) {
-            throw new AppError('INSTALL_INPUT_INVALID', 'MySQL 端口无效', 422);
+            throw new AppError('INSTALL_INPUT_INVALID', '数据库端口无效', 422);
         }
         return [
-            'DB_DSN' => "mysql:host=$host;port=$port;dbname=$database;charset=utf8mb4",
+            'DB_DSN' =>
+                $driver === 'pgsql'
+                    ? "pgsql:host=$host;port=$port;dbname=$database;sslmode=prefer;connect_timeout=3"
+                    : "mysql:host=$host;port=$port;dbname=$database;charset=utf8mb4",
             'DB_USER' => self::value($body, 'dbUser'),
             'DB_PASSWORD' => self::value($body, 'dbPassword'),
             'REDIS_URL' => $redis,
@@ -313,9 +325,7 @@ final class Install
             $config += $keys;
             $step = 'database';
             $pdo = self::database($config);
-            if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql') {
-                self::lockMySql($pdo);
-            }
+            self::lockDatabase($pdo);
             $claim = self::claim($config);
             if ($claim) {
                 if (!hash_equals($claim['sub'], $profile['sub'])) {
@@ -350,14 +360,21 @@ final class Install
                 ],
             ]);
         } catch (\Throwable $error) {
-            if ($step === 'portal' && $error instanceof AppError && $error->key === 'UPSTREAM_TLS') {
+            if (
+                $step === 'portal' &&
+                $error instanceof AppError &&
+                $error->key === 'UPSTREAM_TLS'
+            ) {
                 $step = 'portal-tls';
             }
             if (isset($keys) && !Env::configured()) {
                 self::removeKeys(dirname($keys['TAXILINK_GATEWAY_PRIVATE_KEY']));
             }
             $details = ['error' => $step];
-            if ($error instanceof AppError && in_array($step, ['portal', 'portal-tls', 'profile'], true)) {
+            if (
+                $error instanceof AppError &&
+                in_array($step, ['portal', 'portal-tls', 'profile'], true)
+            ) {
                 $details += ['reason' => $error->key] + $error->details;
             }
             return redirect('/install?' . http_build_query($details))->withHeader(
@@ -367,8 +384,24 @@ final class Install
         }
     }
 
-    private static function lockMySql(\PDO $pdo): void
+    private static function lockDatabase(\PDO $pdo): void
     {
+        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return;
+        }
+        if ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'pgsql') {
+            // Session lock spans DDL and initial login, and is released with this connection.
+            if (
+                (int) $pdo
+                    ->query(
+                        "SELECT CASE WHEN pg_try_advisory_lock(1413567305, hashtext(current_database() || ':' || current_schema())) THEN 1 ELSE 0 END",
+                    )
+                    ->fetchColumn() !== 1
+            ) {
+                throw new \RuntimeException('数据库正在安装');
+            }
+            return;
+        }
         $lock =
             'taxilink-install:' .
             substr(hash('sha256', (string) $pdo->query('SELECT DATABASE()')->fetchColumn()), 0, 40);
@@ -401,10 +434,13 @@ final class Install
 
     private static function requireEmpty(\PDO $pdo): void
     {
-        $sql =
-            $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'sqlite'
-                ? "SELECT COUNT(*) FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
-                : 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()';
+        $sql = match ($pdo->getAttribute(\PDO::ATTR_DRIVER_NAME)) {
+            'sqlite' => "SELECT COUNT(*) FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'",
+            'pgsql'
+                => 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema()',
+            default
+                => 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()',
+        };
         if ((int) $pdo->query($sql)->fetchColumn() !== 0) {
             throw new AppError('INSTALL_DB_NOT_EMPTY', '请选择专用于 TAXILink 的空数据库', 422);
         }
