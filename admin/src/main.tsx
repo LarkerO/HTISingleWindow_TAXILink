@@ -63,24 +63,24 @@ import './style.css';
 
 type RecordData = Record<string, any>;
 const menus = [
-  { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
-  { path: '/carousel', name: '轮播卡片', icon: <SettingOutlined /> },
-  { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
-  { path: '/media', name: '对象存储', icon: <SettingOutlined /> },
-  { path: '/passenger-clients', name: '乘客端接入', icon: <SettingOutlined /> },
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
-  { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/orders', name: '订单与调度', icon: <UnorderedListOutlined /> },
   { path: '/companies', name: '运营企业', icon: <ApartmentOutlined /> },
+  { path: '/memberships', name: '成员与身份', icon: <TeamOutlined /> },
   { path: '/depot_authorizations', name: '车厂授权', icon: <SafetyCertificateOutlined /> },
   { path: '/centers', name: '车辆中心', icon: <CarOutlined /> },
   { path: '/vehicles', name: '车型管理', icon: <CarOutlined /> },
   { path: '/points', name: '虚拟点与点组', icon: <EnvironmentOutlined /> },
-  { path: '/bluemap', name: 'BlueMap 设置', icon: <EnvironmentOutlined /> },
   { path: '/scope', name: '运营范围', icon: <EnvironmentOutlined /> },
   { path: '/fare', name: '计费规则', icon: <SettingOutlined /> },
-  { path: '/memberships', name: '成员与身份', icon: <TeamOutlined /> },
   { path: '/payments', name: '支付记录', icon: <SafetyCertificateOutlined /> },
+  { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
+  { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
+  { path: '/carousel', name: '轮播卡片', icon: <SettingOutlined /> },
+  { path: '/bluemap', name: 'BlueMap 设置', icon: <EnvironmentOutlined /> },
+  { path: '/media', name: '对象存储', icon: <SettingOutlined /> },
+  { path: '/passenger-clients', name: '乘客端接入', icon: <SettingOutlined /> },
+  { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/audit_logs', name: '操作日志', icon: <SafetyCertificateOutlined /> },
 ];
 const companyPages = ['/centers', '/vehicles', '/scope', '/fare', '/memberships'];

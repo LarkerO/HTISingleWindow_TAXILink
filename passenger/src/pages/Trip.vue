@@ -15,6 +15,7 @@ let timer: ReturnType<typeof setInterval> | undefined, ws: WebSocket | undefined
 let reconnect: ReturnType<typeof setTimeout> | undefined,
   stopped = false,
   started = false;
+let fetching = false;
 function accept(next: Order) {
   if (
     !stopped &&
@@ -32,10 +33,14 @@ const title = computed(() => {
   return o.state === 'ACTIVE' ? o.telemetry.stageLabel || '车辆正在准备' : stateLabel[o.state];
 });
 async function load() {
+  if (stopped || fetching) return;
+  fetching = true;
   try {
     accept(await api<Order>('/orders/' + route.params.id));
   } catch (e) {
     report(e);
+  } finally {
+    fetching = false;
   }
 }
 function start() {
@@ -46,7 +51,13 @@ function start() {
   connect();
 }
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  if (stopped) return;
+  try {
+    ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  } catch {
+    reconnect = setTimeout(connect, 5000);
+    return;
+  }
   ws.onopen = () => (connected.value = true);
   ws.onmessage = (e) => {
     try {

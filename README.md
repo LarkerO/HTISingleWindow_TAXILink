@@ -1,3 +1,7 @@
+# TAXILink 0.5.2
+
+正式版本说明与保留数据升级：[0.5.2](docs/RELEASE_0.5.2.md)。
+
 # TAXILink 城市出行平台
 
 与 `TAXILink_MOD` 独立的业务仓库，面向单个 Minecraft 服务器、单个 MTR 维度。

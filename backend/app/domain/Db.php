@@ -149,6 +149,67 @@ final class Db
     }
     public static function migrate(): void
     {
+        $pdo = self::pdo();
+        if ($pdo->inTransaction()) {
+            throw new \RuntimeException('迁移必须在独立维护连接执行，不能嵌入业务事务');
+        }
+        $driver = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $locked = false;
+        $name =
+            'taxilink_schema_' .
+            substr(
+                hash(
+                    'sha256',
+                    (string) ($driver === 'mysql'
+                        ? $pdo->query('SELECT DATABASE()')->fetchColumn()
+                        : 'schema'),
+                ),
+                0,
+                32,
+            );
+        try {
+            if ($driver === 'mysql') {
+                $q = $pdo->prepare('SELECT GET_LOCK(?,0)');
+                $q->execute([$name]);
+                if ((int) $q->fetchColumn() !== 1) {
+                    throw new \RuntimeException('已有数据库迁移正在执行');
+                }
+                $locked = true;
+            } elseif ($driver === 'pgsql') {
+                if (
+                    (int) $pdo
+                        ->query('SELECT CASE WHEN pg_try_advisory_lock(20520502) THEN 1 ELSE 0 END')
+                        ->fetchColumn() !== 1
+                ) {
+                    throw new \RuntimeException('已有数据库迁移正在执行');
+                }
+                $locked = true;
+            } else {
+                $pdo->exec('BEGIN IMMEDIATE');
+                $locked = true;
+            }
+            self::applyMigration();
+            if ($driver === 'sqlite') {
+                $pdo->exec('COMMIT');
+                $locked = false;
+            }
+        } catch (\Throwable $e) {
+            if ($driver === 'sqlite' && $locked) {
+                $pdo->exec('ROLLBACK');
+                $locked = false;
+            }
+            throw $e;
+        } finally {
+            if ($locked && $driver === 'mysql') {
+                $q = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+                $q->execute([$name]);
+            } elseif ($locked && $driver === 'pgsql') {
+                $pdo->query('SELECT pg_advisory_unlock(20520502)');
+            }
+        }
+    }
+    private static function applyMigration(): void
+    {
         $definitions = [
             'users' =>
                 'id VARCHAR(64) PRIMARY KEY, portal_sub VARCHAR(128) UNIQUE NOT NULL, username VARCHAR(120) NOT NULL, avatar TEXT, first_login BIGINT NOT NULL, platform_admin INTEGER NOT NULL DEFAULT 0',

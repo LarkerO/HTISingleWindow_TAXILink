@@ -415,9 +415,89 @@ test('Console 地图支持拖拽、Ant Design 控制与 3D 失败恢复', { time
     await server.close();
   }
 });
-test('品牌 logo 与两个乘客端主页轮播显示及外链新窗口', {timeout:30000}, async()=>{
- const roots=['passenger/dist',process.env.CAROUSEL_V2_ROOT].filter(Boolean);
- for(const root of roots){const server=await serve(root),browser=await launch();const page=await browser.newPage({viewport:{width:390,height:844}});
- try{await mapFixture(page);await page.route('**/api/carousel',r=>r.fulfill({json:{items:[{title:'测试推广',image:server.base+'/logo.png',enabled:true,placement:'home',width:600,height:180,type:'url',target:'https://example.test/promo'}]}}));await page.route('**/logo.png',async r=>r.fulfill({contentType:'image/png',body:await readFile('logo.png')}));await page.context().route('https://example.test/**',r=>r.fulfill({body:'promotion'}));await page.goto(server.base);await expect(page.locator('.promo-carousel,.promo').first()).toBeVisible();const promo=page.locator('.promo-carousel,.promo').first();await promo.scrollIntoViewIfNeeded();const popup=page.waitForEvent('popup');await promo.locator('button,uni-image,img').first().click();const opened=await popup;await expect(opened).toHaveURL('https://example.test/promo');if(root==='passenger/dist')await expect(page.locator('header img[alt="TAXILink"]')).toBeVisible();await page.screenshot({path:artifacts+(root==='passenger/dist'?'/vue-carousel.png':'/v2-carousel.png'),fullPage:true});}
- finally{await browser.close();await server.close();}}
+test('品牌 logo 与两个乘客端主页轮播显示及外链新窗口', { timeout: 30000 }, async () => {
+  const roots = ['passenger/dist', process.env.CAROUSEL_V2_ROOT].filter(Boolean);
+  for (const root of roots) {
+    const server = await serve(root),
+      browser = await launch();
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    try {
+      await mapFixture(page);
+      await page.route('**/api/carousel', (r) =>
+        r.fulfill({
+          json: {
+            items: [
+              {
+                title: '测试推广',
+                image: server.base + '/logo.png',
+                enabled: true,
+                placement: 'home',
+                width: 600,
+                height: 180,
+                type: 'url',
+                target: 'https://example.test/promo',
+              },
+            ],
+          },
+        }),
+      );
+      await page.route('**/logo.png', async (r) =>
+        r.fulfill({ contentType: 'image/png', body: await readFile('logo.png') }),
+      );
+      await page
+        .context()
+        .route('https://example.test/**', (r) => r.fulfill({ body: 'promotion' }));
+      await page.goto(server.base);
+      await expect(page.locator('.promo-carousel,.promo').first()).toBeVisible();
+      const promo = page.locator('.promo-carousel,.promo').first();
+      await promo.scrollIntoViewIfNeeded();
+      const popup = page.waitForEvent('popup');
+      await promo.locator('button,uni-image,img').first().click();
+      const opened = await popup;
+      await expect(opened).toHaveURL('https://example.test/promo');
+      if (root === 'passenger/dist')
+        await expect(page.locator('header img[alt="TAXILink"]')).toBeVisible();
+      await page.screenshot({
+        path: artifacts + (root === 'passenger/dist' ? '/vue-carousel.png' : '/v2-carousel.png'),
+        fullPage: true,
+      });
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  }
+});
+test('Vue v1 WebSocket 离线时页面响应且慢 HTTP 轮询不堆叠', { timeout: 20000 }, async () => {
+  const server = await serve('passenger/dist'),
+    browser = await launch(),
+    page = await browser.newPage();
+  let active = 0,
+    max = 0,
+    calls = 0;
+  try {
+    await mapFixture(page);
+    await page.route('**/api/me', (r) => r.fulfill({ json: { user, demo: false } }));
+    await page.route('**/api/orders/offline', async (r) => {
+      calls++;
+      active++;
+      max = Math.max(max, active);
+      await new Promise((resolve) => setTimeout(resolve, 6500));
+      active--;
+      await r
+        .fulfill({ status: 503, json: { error: { message: '测试网络不可用' } } })
+        .catch(() => {});
+    });
+    await page.routeWebSocket('**/ws', (ws) => ws.close({ code: 1013, reason: 'offline' }));
+    await page.goto(server.base + '/trip/offline');
+    assert.equal(
+      await page.evaluate(() => new Promise((r) => setTimeout(() => r('responsive'), 100))),
+      'responsive',
+    );
+    await page.waitForTimeout(8500);
+    assert.equal(max, 1);
+    assert.ok(calls >= 2);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
 });
