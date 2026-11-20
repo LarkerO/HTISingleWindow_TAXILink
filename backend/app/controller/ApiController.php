@@ -5,6 +5,8 @@ use app\domain\{
     Announcements,
     Clients,
     Media,
+    ObjectStorage,
+    Operations,
     Admin,
     AppError,
     Auth,
@@ -183,6 +185,9 @@ final class ApiController
             Auth::csrf($r, $u);
         }
         $input = $method === 'GET' ? [] : $r->post();
+        if ($method === 'GET' && $path === '/api/media/providers') {
+            return ObjectStorage::choices();
+        }
         if ($path === '/api/admin/passenger-clients') {
             Auth::platform($u);
             if ($method === 'GET') {
@@ -197,7 +202,7 @@ final class ApiController
         }
         if ($method === 'GET' && $path === '/api/admin/media/settings') {
             Auth::platform($u);
-            return Media::settings();
+            return Media::settings(is_string($r->get('provider')) ? $r->get('provider') : null);
         }
         if ($method === 'POST' && $path === '/api/admin/media') {
             RateLimit::check('media:' . $u['id'], 20);
@@ -206,6 +211,7 @@ final class ApiController
                 (string) ($input['purpose'] ?? ''),
                 (string) ($input['companyId'] ?? ''),
                 $r->file('file'),
+                is_string($input['provider'] ?? null) ? $input['provider'] : null,
             );
         }
         if (preg_match('#^/api/admin/announcements(?:/([a-z0-9-]+))?$#D', $path, $m)) {
@@ -341,7 +347,7 @@ final class ApiController
         }
         if ($method === 'GET' && $path === '/api/admin/system_logs') {
             Auth::platform($u);
-            return SystemLog::recent();
+            return SystemLog::recent($r->get());
         }
         if ($method === 'GET' && $path === '/api/admin/summary') {
             $company = $r->get('companyId');
@@ -417,6 +423,15 @@ final class ApiController
                     Auth::platform($u);
                 }
                 $action = $input['action'] ?? '';
+                if (
+                    in_array(
+                        $action,
+                        ['destroy', 'open_doors', 'close_doors', 'clear_blocker'],
+                        true,
+                    )
+                ) {
+                    return Operations::physical($u, $o, $action, $input);
+                }
                 if (!in_array($action, ['emergency', 'resume', 'cancel'], true)) {
                     throw new AppError('INVALID_ACTION', '调度操作无效');
                 }

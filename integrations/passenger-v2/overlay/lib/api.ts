@@ -95,7 +95,7 @@ export async function logout(): Promise<void> {
   nativeCookie = ''
 }
 
-export function uploadImage(filePath: string, purpose: string, companyId: string): Promise<string> {
+export function uploadImage(filePath: string, purpose: string, companyId: string, provider: string = ''): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const headers: Record<string, string> = {}
     if (user.value != null) headers['X-CSRF-Token'] = user.value.csrf
@@ -104,7 +104,7 @@ export function uploadImage(filePath: string, purpose: string, companyId: string
     // #endif
     uni.uploadFile({
       url: serviceUrl('/api/admin/media'), filePath, name: 'file', header: headers,
-      formData: { purpose, companyId }, timeout: 60000,
+      formData: provider.length > 0 ? { purpose, companyId, provider } : { purpose, companyId }, timeout: 60000,
       success: (response) => {
         try {
           const data = JSON.parse(response.data) as UploadResult

@@ -346,6 +346,9 @@ final class Booking
     {
         $view = self::view($o);
         $t = $view['telemetry'];
+        if (isset($t['obstruction']['blockers'])) {
+            unset($t['obstruction']['blockers']);
+        }
         $stage = $t['stage'] ?? '';
         if ($view['state'] === 'COMPLETED') {
             $t['phase'] = 'COMPLETED';
@@ -418,6 +421,7 @@ final class Booking
             'dropoff' => $snapshot['dropoff'],
             'passengers' => (int) $o['passengers'],
             'companyId' => $o['company_id'] ?? null,
+            'vehiclePending' => (bool) ($o['vehicle_pending'] ?? false),
             'amountMinor' => (int) $o['amount'],
             'paidMinor' => (int) $o['paid'],
             'createdAt' => (int) $o['created_at'],

@@ -1,0 +1,370 @@
+<script setup lang="ts">
+import { themePrimary, themeTint } from '../lib/theme'
+import { computed, ref } from 'vue'
+import { api, message, notify, uploadImage } from '../lib/api'
+import { asObject, asRows, companyPath, defaultFare, fareFields, listResource, vehicleTemplate } from '../lib/admin'
+import type { Entry, Row } from '../lib/admin'
+
+type Props = { section: string; row: Row | null; company: string; editable: boolean }
+const props = defineProps<Props>()
+const emit = defineEmits<{ saved: [] }>()
+const cashier = ref<Row>({ ...props.row, keyId: '', privateKey: '' })
+const cashierEnabled = ref<string>(props.row?.['enabled'] == true ? 'yes' : 'no')
+const cashierEnvironment = ref<string>(String(props.row?.['environment'] ?? 'sandbox'))
+const cashierFields: Entry[] = [
+  { id: 'origin', title: '收银台来源地址（不含路径）' }, { id: 'merchant', title: '商户号' },
+  { id: 'keyId', title: 'API Key（留空保留）' }, { id: 'privateKey', title: 'SM2 私钥 PEM（留空保留）' },
+  { id: 'platformKey', title: '平台 SM2 公钥 PEM' }, { id: 'returnUrl', title: '乘客端 /payment-return 完整回跳地址' }
+]
+const busy = ref<boolean>(false)
+const loading = ref<boolean>(false)
+const error = ref<string>('')
+const imageUrl = ref<string>(String(props.row?.['image_url'] ?? ''))
+const uploading = ref<boolean>(false)
+const title = ref<string>(String(props.row?.['title'] ?? ''))
+const markdown = ref<string>(String(props.row?.['markdown'] ?? ''))
+const published = ref<boolean>(Number(props.row?.['published'] ?? 0) == 1)
+const listed = ref<boolean>(Number(props.row?.['listed'] ?? 1) == 1)
+const loginRequired = ref<boolean>(Number(props.row?.['login_required'] ?? 0) == 1)
+const placements = ref<string[]>(props.row == null ? [] : JSON.parse(String(props.row['placements'] ?? '[]')) as string[])
+const preview = ref<boolean>(false)
+const name = ref<string>(String(props.row?.['name'] ?? ''))
+const description = ref<string>(String(props.row?.['description'] ?? ''))
+const enabled = ref<string>(Number(props.row?.['enabled'] ?? 1) == 1 ? 'yes' : 'no')
+const mapId = ref<string>(String(props.row?.['mapId'] ?? 'heishan7_0'))
+const allow3d = ref<string>(props.row?.['allow3d'] == false ? 'no' : 'yes')
+const group = ref<string[]>([String(props.row?.['group_id'] ?? '@none')])
+const groupOptions = ref<Entry[]>([])
+const options = ref<Entry[]>([])
+const selected = ref<string[]>([])
+const depotPairs = ref<Row[]>([])
+const seedPick = ref<string[]>([])
+const seedOptions = ref<Entry[]>([])
+const seedRows = ref<Row[]>([])
+const scopeAction = ref<string>('add')
+const vehicle = asObject(props.row?.['config'], vehicleTemplate)
+const motion = ref<Record<string, string>>({})
+const cars = ref<Row[]>([])
+const fare = { ...defaultFare, ...asObject(props.row?.['fare'], defaultFare) }
+const amounts = ref<Record<string, string>>({})
+const fareMode = ref<string>(String(fare['mode']))
+const payment = ref<string>(String(fare['payment']))
+const query = ref<string>('')
+const limit = ref<number>(30)
+
+const yesNo: Entry[] = [{ id: 'yes', title: '启用' }, { id: 'no', title: '停用' }]
+const billing: Entry[] = [{ id: 'fixed', title: '一口价' }, { id: 'metered', title: '实时计费' }]
+const payments: Entry[] = [{ id: 'after', title: '先乘后付' }, { id: 'before', title: '先付后乘' }, { id: 'adjust', title: '预付后补退' }]
+const scopeActions: Entry[] = [{ id: 'add', title: '添加' }, { id: 'remove', title: '移除' }]
+const motionFields: Entry[] = [
+  { id: 'maxSpeedKmh', title: '最高速度（km/h）' }, { id: 'accelerationMps2', title: '加速度（m/s²）' },
+  { id: 'decelerationMps2', title: '减速度（m/s²）' }
+]
+const carFields: Entry[] = [
+  { id: 'capacity', title: '座位数' }, { id: 'length', title: '车身长度（米）' }, { id: 'width', title: '车身宽度（米）' },
+  { id: 'bogie1Position', title: '前转向架位置（米）' }, { id: 'bogie2Position', title: '后转向架位置（米）' },
+  { id: 'couplingPadding1', title: '前端连接间距（米）' }, { id: 'couplingPadding2', title: '后端连接间距（米）' }
+]
+const hasName = computed((): boolean => !['fare','scope','map-settings','announcements','cashier'].includes(props.section))
+const hasEnabled = computed((): boolean => ['companies','centers','points'].includes(props.section))
+const chooser = computed((): boolean => ['centers','points','scope'].includes(props.section))
+const display = computed((): Entry[] => {
+  const keyword = query.value.trim().toLowerCase()
+  return options.value.filter((item): boolean =>
+    selected.value.includes(item.id) || !keyword || (item.title + ' ' + item.id).toLowerCase().includes(keyword)).slice(0, limit.value)
+})
+const pickedGroup = computed((): string => groupOptions.value.find((item): boolean => item.id == group.value[0])?.title ?? '未分组')
+
+function entry(item: Row): Entry {
+  return { id: String(item['id']), title: String(item['name'] ?? item['id']) }
+}
+function carDraft(source: Row): Row {
+  const draft: Row = { vehicleId: String(source['vehicleId'] ?? '') }
+  for (const field of carFields) draft[field.id] = String(source[field.id] ?? '')
+  return draft
+}
+function fillVehicle(source: Row): void {
+  const values: Record<string, string> = {}
+  for (const field of motionFields) values[field.id] = String(source[field.id] ?? vehicleTemplate[field.id])
+  motion.value = values
+  cars.value = asRows(source['vehicleCars']).map(carDraft)
+}
+function numberField(value: any, label: string): number {
+  const text = String(value ?? '').trim()
+  if (!text || !Number.isFinite(Number(text))) throw new Error('请输入有效的' + label)
+  return Number(text)
+}
+function buildVehicle(): Row {
+  if (!cars.value.length) throw new Error('车型至少需要一节车厢')
+  const result: Row = {}
+  for (const field of motionFields) result[field.id] = numberField(motion.value[field.id], field.title)
+  result['vehicleCars'] = cars.value.map((item): Row => {
+    const resource = String(item['vehicleId'] ?? '').trim()
+    if (!resource) throw new Error('请填写每节车厢的车型资源 ID')
+    const car: Row = { vehicleId: resource }
+    for (const field of carFields) car[field.id] = numberField(item[field.id], field.title)
+    return car
+  })
+  return result
+}
+function addCar(): void {
+  if (cars.value.length < 16) cars.value = [...cars.value, carDraft(vehicleTemplate['vehicleCars'][0] as Row)]
+}
+function removeCar(index: number): void {
+  cars.value = cars.value.filter((_item, current): boolean => current != index)
+}
+async function prepare(): Promise<void> {
+  loading.value = true
+  error.value = ''
+  try {
+    if (props.section == 'points') {
+      const [groups, platforms] = await Promise.all([listResource('point_groups', ''), api<Row[]>('/admin/catalog/platforms')])
+      groupOptions.value = [{ id: '@none', title: '未分组' }, ...groups.map(entry)]
+      options.value = platforms.map((item): Entry => ({ id: String(item['id']), title: String(item['name'] ?? item['id']) + ' · ' + item['id'] }))
+      if (props.row != null) selected.value = await api<string[]>('/admin/points/' + encodeURIComponent(props.row['id']) + '/platforms')
+    } else if (props.section == 'centers') {
+      const [depots, sidings] = await Promise.all([api<Row[]>('/admin/catalog/depots'), api<Row[]>('/admin/catalog/sidings')])
+      const current = asRows(props.row?.['depots'])
+      selected.value = current.map((item): string => String(item['depotId']))
+      depotPairs.value = [...current]
+      for (const depot of depots) {
+        const id = String(depot['id'])
+        const siding = sidings.find((item): boolean => item['depotId'] == id)
+        if (siding != null && depot['allowedForTaxi'] && Number(depot['sidingCount']) == 1) {
+          options.value.push(entry(depot))
+          if (!selected.value.includes(id)) depotPairs.value.push({ depotId: id, sidingId: String(siding['id']) })
+        } else if (selected.value.includes(id)) options.value.push(entry(depot))
+      }
+      for (const id of selected.value) {
+        if (!options.value.some((item): boolean => item.id == id)) options.value.push({ id, title: '原车厂 · ' + id })
+      }
+    } else if (props.section == 'scope') {
+      const [points, groups] = await Promise.all([listResource('points', ''), listResource('point_groups', '')])
+      options.value = [...groups.map((item): Entry => ({ id: 'g:' + item['id'], title: '点组 · ' + item['name'] })),
+        ...points.map((item): Entry => ({ id: 'p:' + item['id'], title: String(item['name']) }))]
+    } else if (props.section == 'vehicles') {
+      fillVehicle(vehicle)
+    } else if (props.section == 'fare') {
+      const values: Record<string, string> = {}
+      for (const field of fareFields) values[field.id] = String(fare[field.id])
+      amounts.value = values
+    }
+  } catch (failure) { error.value = message(failure) }
+  finally { loading.value = false }
+}
+function toggle(id: string): void {
+  selected.value = selected.value.includes(id) ? selected.value.filter((item): boolean => item != id) : [...selected.value, id]
+}
+async function loadSeeds(): Promise<void> {
+  try {
+    seedRows.value = (await api<Row[]>('/admin/catalog/sidings')).filter((item): boolean => asRows(item['vehicleCars']).length > 0)
+    seedOptions.value = seedRows.value.map(entry)
+    if (!seedOptions.value.length) notify('暂无可导入的停车轨道车型')
+    else seedPick.value = [seedOptions.value[0].id]
+  } catch (failure) { notify(failure) }
+}
+function useSeed(): void {
+  const item = seedRows.value.find((row): boolean => row['id'] == seedPick.value[0])
+  if (item == null) return
+  fillVehicle({ ...vehicleTemplate, maxSpeedKmh: item['maxSpeedKmh'] ?? 60,
+    accelerationMps2: item['accelerationMps2'] ?? 1, decelerationMps2: item['decelerationMps2'] ?? 1,
+    vehicleCars: asRows(item['vehicleCars']) })
+}
+async function chooseImage(): Promise<void> {
+  if (uploading.value || !props.editable) return
+  let provider = ''
+  try {
+    const choices = await api<{ activeProvider: string; items: { id: string; name: string }[] }>('/media/providers')
+    if (choices.items.length > 1) {
+      provider = await new Promise<string>((resolve) => {
+        uni.showActionSheet({ itemList: ['使用默认服务', ...choices.items.map((item): string => item.name)],
+          success: (result) => resolve(result.tapIndex == 0 ? '' : choices.items[result.tapIndex - 1].id), fail: () => resolve('cancel') })
+      })
+      if (provider == 'cancel') return
+    }
+  } catch (error) { notify(error); return }
+  uni.chooseImage({ count: 1, success: (result) => {
+    if (result.tempFilePaths.length == 0) return
+    uploading.value = true
+    const purpose = props.section == 'announcements' ? 'announcement' : (props.section == 'companies' ? 'company' : 'vehicle')
+    uploadImage(result.tempFilePaths[0], purpose, props.company, provider).then((url): void => {
+      if (props.section == 'announcements') markdown.value += '\n\n![公告配图](' + url + ')\n'
+      else imageUrl.value = url
+    }).catch(notify).finally((): void => { uploading.value = false })
+  } })
+}
+function togglePlacement(value: string): void {
+  placements.value = placements.value.includes(value) ? placements.value.filter((p): boolean => p != value) : [...placements.value, value]
+}
+async function save(): Promise<void> {
+  if (busy.value || uploading.value || loading.value || error.value || !props.editable) return
+  busy.value = true
+  try {
+    const id = props.row?.['id'] as string | undefined
+    if (props.section == 'announcements') {
+      await api('/admin/announcements' + (id ? '/' + id : ''), { title: title.value, markdown: markdown.value, placements: placements.value, published: published.value, listed: listed.value, login_required: loginRequired.value }, '', id ? 'PATCH' : 'POST')
+    } else if (props.section == 'cashier') {
+      await api('/admin/cashier' + (props.company ? '/' + props.company : ''), { ...cashier.value, enabled: cashierEnabled.value == 'yes', environment: cashierEnvironment.value })
+    } else if (props.section == 'fare') {
+      const data: Row = { mode: fareMode.value, payment: payment.value }
+      for (const field of fareFields) {
+        const text = amounts.value[field.id]?.trim() ?? ''
+        if (!/^\d+$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error(field.title + '须为非负整数')
+        data[field.id] = Number(text)
+      }
+      await api(companyPath(props.company, 'fare'), { fare: data })
+    } else if (props.section == 'map-settings') {
+      const map = mapId.value.trim()
+      if (!map) throw new Error('请输入 BlueMap 地图 ID')
+      await api('/admin/map-settings', { mapId: map, allow3d: allow3d.value == 'yes' })
+    } else if (props.section == 'scope') {
+      if (!selected.value.length) throw new Error('请选择站点或点组')
+      await api(companyPath(props.company, 'scope'), {
+        action: scopeAction.value, pointIds: selected.value.filter((item): boolean => item.startsWith('p:')).map((item): string => item.slice(2)),
+        groupIds: selected.value.filter((item): boolean => item.startsWith('g:')).map((item): string => item.slice(2))
+      })
+    } else {
+      const value = name.value.trim()
+      if (!value) throw new Error('请输入名称')
+      const data: Row = { name: value, enabled: enabled.value == 'yes', companyId: props.company }
+      if (['companies','vehicles'].includes(props.section)) data['image_url'] = imageUrl.value
+      if (props.section == 'points') {
+        if (!selected.value.length) throw new Error('请关联至少一条站台轨道')
+        data['description'] = description.value
+        data['groupId'] = group.value[0] == '@none' ? null : group.value[0]
+        data['platformIds'] = selected.value
+      }
+      if (props.section == 'centers') {
+        if (!selected.value.length) throw new Error('请选择至少一个专用车厂')
+        data['depots'] = depotPairs.value.filter((item): boolean => selected.value.includes(item['depotId']))
+      }
+      if (props.section == 'vehicles') {
+        data['config'] = buildVehicle()
+      }
+      await api('/admin/' + props.section + (id ? '/' + encodeURIComponent(id) : ''), data, '', id ? 'PATCH' : 'POST')
+    }
+    emit('saved')
+    notify('已保存')
+  } catch (failure) { notify(failure) }
+  finally { busy.value = false }
+}
+onMounted(prepare)
+</script>
+
+<template>
+  <view class="editor">
+    <x-loading v-if="loading" label="正在加载配置" />
+    <view v-else-if="error">
+      <x-text :label="error" color="#a94d1b" class="mb-10" />
+      <x-button :block="true" @click="prepare">重试</x-button>
+    </view>
+    <view v-else>
+      <view v-if="section == 'announcements'" class="editor-section">
+        <x-text label="公告标题" class="mb-6" /><x-input v-model="title" placeholder="最多 120 字" />
+        <x-cell title="发布" :link="false"><template #label><x-switch v-model="published" /></template></x-cell>
+        <x-cell title="在公告列表显示" :link="false"><template #label><x-switch v-model="listed" /></template></x-cell>
+        <x-cell title="需要登录查看" :link="false"><template #label><x-switch v-model="loginRequired" /></template></x-cell>
+        <x-text label="页面通知栏位置（可多选）" class="mb-6" />
+        <x-checkbox :model-value="placements.includes('booking')" :value="true" :un-check-value="false" @change="togglePlacement('booking')">下单页</x-checkbox>
+        <x-checkbox :model-value="placements.includes('orders')" :value="true" :un-check-value="false" @change="togglePlacement('orders')">订单页</x-checkbox>
+        <x-checkbox :model-value="placements.includes('profile')" :value="true" :un-check-value="false" @change="togglePlacement('profile')">个人中心</x-checkbox>
+        <x-cell title="预览 Markdown" :link="false"><template #label><x-switch v-model="preview" /></template></x-cell>
+        <x-cmarkdown v-if="preview" :value="markdown" />
+        <textarea v-else v-model="markdown" :maxlength="200000" placeholder="使用 Markdown 编写正文" style="height: 260px; width: 100%;" />
+        <x-button :loading="uploading" @click="chooseImage">上传正文配图</x-button>
+      </view>
+      <view v-if="['companies','vehicles'].includes(section)" class="editor-section">
+        <x-text :label="section == 'companies' ? '公司标志' : '车型示意图'" class="mb-6" />
+        <image v-if="imageUrl" :src="imageUrl" mode="aspectFit" style="width: 120px; height: 70px;" />
+        <x-input v-model="imageUrl" placeholder="HTTPS 图片地址" :disabled="!editable" />
+        <x-button v-if="editable" :loading="uploading" @click="chooseImage">选择存储并上传图片（最多 5MB）</x-button>
+        <x-button v-if="editable && imageUrl" @click="imageUrl = ''">清除图片</x-button>
+      </view>
+      <view v-if="hasName" class="editor-section">
+        <view class="field-label"><x-text label="名称" font-size="14" /></view>
+        <x-input v-model="name" placeholder="填写名称" :show-clear="editable" :disabled="!editable" />
+      </view>
+      <view v-if="hasEnabled" class="editor-section">
+        <x-text label="启用状态" font-size="14" class="mb-6" />
+        <x-radio-button v-model="enabled" :list="yesNo" />
+      </view>
+      <view v-if="section == 'points'" class="editor-section">
+        <x-input v-model="description" placeholder="站点说明" />
+        <x-picker v-model="group" :list="groupOptions" title="选择站点分组"><x-cell title="所属分组" :label="pickedGroup" /></x-picker>
+      </view>
+      <view v-if="section == 'map-settings'" class="editor-section">
+        <x-text label="BlueMap 地图 ID" font-size="14" class="mb-6" />
+        <x-input v-model="mapId" placeholder="地图 ID" class="mb-12" />
+        <x-text label="3D 模式" font-size="14" class="mb-6" />
+        <x-radio-button v-model="allow3d" :list="yesNo" />
+      </view>
+      <view v-if="section == 'cashier'" class="editor-section">
+        <x-text label="公司未启用专属商户时使用总商户，预付款未确定承运公司时也使用总商户。退款使用原商户。正式车费向上取整到整游戏币。" class="mb-12" />
+        <x-text label="启用商户" /><x-radio-button v-model="cashierEnabled" :list="yesNo" />
+        <x-text label="交易环境" /><x-radio-button v-model="cashierEnvironment" :list="[{ id: 'sandbox', title: '沙箱' }, { id: 'live', title: '正式' }]" />
+        <view v-for="field in cashierFields" :key="field.id" class="mb-12">
+          <x-text :label="field.title" />
+          <textarea style="height: 160px; width: 100%;" :maxlength="8192" v-if="field.id == 'privateKey' || field.id == 'platformKey'" v-model="cashier[field.id]" :disabled="!editable" />
+          <x-input v-else v-model="cashier[field.id]" :disabled="!editable" />
+        </view>
+      </view>
+      <view v-if="section == 'fare'" class="editor-section">
+        <x-text label="计费方式" font-size="14" class="mb-6" />
+        <x-radio-button v-if="editable" v-model="fareMode" :list="billing" class="mb-10" />
+        <x-text v-else :label="fareMode == 'fixed' ? '一口价' : '实时计费'" class="mb-10" />
+        <x-text label="支付方式" font-size="14" class="mb-6" />
+        <x-radio-button v-if="editable" v-model="payment" :list="payments" class="mb-10" />
+        <x-text v-else :label="payments.find((item) => item.id == payment)?.title ?? payment" class="mb-10" />
+        <view v-for="field in fareFields" :key="field.id" class="editor-field">
+          <view class="field-label"><x-text :label="field.title" font-size="14" /></view>
+          <x-input v-model="amounts[field.id]" type="number" :disabled="!editable" />
+        </view>
+      </view>
+      <view v-if="section == 'vehicles'" class="editor-section">
+        <view class="editor-field">
+          <x-button :block="true" height="44" :color="themeTint" :font-color="themePrimary" @click="loadSeeds">读取轨道车型</x-button>
+        </view>
+        <view v-if="seedOptions.length" class="editor-section">
+          <x-picker v-model="seedPick" :list="seedOptions" title="选择停车轨道">
+            <x-cell title="车型来源" :label="seedOptions.find((item) => item.id == seedPick[0])?.title ?? ''" />
+          </x-picker>
+          <x-button :block="true" height="44" :color="themeTint" :font-color="themePrimary" @click="useSeed">导入所选轨道参数</x-button>
+        </view>
+        <view class="field-label"><x-text label="行驶参数" font-size="16" class="text-weight-b" /></view>
+        <view v-for="field in motionFields" :key="field.id" class="editor-field">
+          <view class="field-label"><x-text :label="field.title" font-size="13" /></view>
+          <x-input v-model="motion[field.id]" type="digit" />
+        </view>
+        <view v-for="(car, index) in cars" :key="index" class="car-section">
+          <view class="field-label"><x-text :label="'车厢 ' + (index + 1)" font-size="16" class="text-weight-b" /></view>
+          <view class="editor-field">
+            <x-input v-model="car['vehicleId']" placeholder="车型资源 ID" />
+          </view>
+          <view v-for="field in carFields" :key="field.id" class="editor-field">
+            <view class="field-label"><x-text :label="field.title" font-size="13" /></view>
+            <x-input v-model="car[field.id]" />
+          </view>
+          <x-button v-if="cars.length > 1" :block="true" height="44" color="#f8eae4" font-color="#a94d1b"
+            @click="removeCar(index)">移除车厢</x-button>
+        </view>
+        <x-button v-if="cars.length < 16" :block="true" height="44" :color="themeTint" :font-color="themePrimary" @click="addCar">添加车厢</x-button>
+      </view>
+      <view v-if="chooser" class="surface-gap">
+        <x-radio-button v-if="section == 'scope'" v-model="scopeAction" :list="scopeActions" class="mb-10" />
+        <x-input v-model="query" :placeholder="section == 'centers' ? '搜索车厂' : '搜索站点或轨道'" :show-clear="true" />
+        <x-cell v-for="item in display" :key="item.id" :title="item.title" :link="false"
+          :icon="selected.includes(item.id) ? 'checkbox-circle-fill' : 'checkbox-blank-circle-line'" @click="toggle(item.id)" />
+        <x-button v-if="options.length > display.length && !query" :block="true" @click="limit += 30">显示更多</x-button>
+      </view>
+      <x-button v-if="editable" :block="true" height="46" :color="themePrimary" :loading="busy" @click="save">保存</x-button>
+    </view>
+  </view>
+</template>
+
+<style scoped>
+.editor { padding-bottom: 16px; }
+.editor-section { margin-bottom: 16px; }
+.editor-field { margin-bottom: 12px; }
+.field-label { margin-bottom: 6px; }
+.car-section { border-top-width: 1px; border-top-color: #e2e6e4; padding-top: 14px; margin-bottom: 16px; }
+</style>

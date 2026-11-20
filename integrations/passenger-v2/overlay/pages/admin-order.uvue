@@ -1,0 +1,124 @@
+<script setup lang="ts">
+import { themePrimary, themeTint } from '../lib/theme'
+import { computed, ref } from 'vue'
+import MapSheet from '../components/MapSheet.uvue'
+import { api, message, notify, refreshUser, user } from '../lib/api'
+import { canManage, scopedPath } from '../lib/admin'
+import type { Row } from '../lib/admin'
+import { formatDate, isTerminal, stateLabel } from '../lib/models'
+import type { Order, Position } from '../lib/models'
+
+type Events = { items: Row[] }
+const id = ref<string>('')
+const company = ref<string>('')
+const order = ref<Order | null>(null)
+const events = ref<Row[]>([])
+const error = ref<string>('')
+const loading = ref<boolean>(true)
+const busy = ref<boolean>(false)
+const confirming = ref<boolean>(false)
+const action = ref<string>('')
+const labels: Record<string, string> = { emergency: '紧急停车', resume: '恢复运行', cancel: '取消订单', open_doors: '开门并保持停车', close_doors: '关门', destroy: '清除空车', clear_blocker: '清除占用的空载回库车' }
+const targetOrderId = ref<string>('')
+const canPhysical = computed((): boolean => user.value?.platformAdmin == true || user.value?.memberships.some(item => item.company_id == order.value?.companyId && item.role == 'admin') == true)
+const position = computed((): Position | undefined => order.value != null && (!isTerminal(order.value.state) || order.value.vehiclePending == true)
+  ? order.value.telemetry.position : undefined)
+const controllable = computed((): boolean => order.value != null && (!isTerminal(order.value.state) || order.value.vehiclePending == true) &&
+  (user.value?.platformAdmin == true || (order.value.companyId != null &&
+    user.value?.memberships.some((item): boolean => item.company_id == order.value?.companyId) == true)))
+
+async function load(): Promise<void> {
+  loading.value = true
+  error.value = ''
+  try {
+    if (!canManage(user.value) || !/^[a-z0-9-]+$/.test(id.value)) throw new Error('无法访问该订单')
+    const data = await api<Order[]>(scopedPath('orders', company.value))
+    const current = data.find((item): boolean => item.id == id.value)
+    if (current == null) throw new Error('该订单已不在当前管理范围内')
+    const feed = await api<Events>('/admin/orders/' + id.value + '/events')
+    order.value = current
+    events.value = feed.items
+  } catch (failure) {
+    order.value = null
+    events.value = []
+    error.value = message(failure)
+  } finally { loading.value = false }
+}
+
+async function start(): Promise<void> {
+  try { await refreshUser(); await load() }
+  catch (failure) { error.value = message(failure); loading.value = false }
+}
+function choose(value: string, target: string = ''): void {
+  action.value = value
+  targetOrderId.value = target
+  confirming.value = true
+}
+async function control(): Promise<void> {
+  if (busy.value || !controllable.value || !labels[action.value]) return
+  busy.value = true
+  try {
+    await api('/admin/orders/' + id.value + '/control', { action: action.value, targetOrderId: targetOrderId.value })
+    notify('调度指令已提交')
+    await load()
+  } catch (failure) { notify(failure) }
+  finally { busy.value = false }
+}
+onLoad((options) => { id.value = options?.['id'] ?? ''; company.value = options?.['company'] ?? '' })
+onShow(start)
+</script>
+
+<template>
+  <MapSheet title="订单与调度" back="/pages/admin" :geometry="order?.telemetry.geometry" :position="position" :peek="316">
+    <view class="admin-trip">
+      <x-skeleton v-if="loading && !order" height="130" />
+      <view v-else-if="order">
+        <view class="metric-row mb-10">
+          <x-text :label="stateLabel[order.state] ?? order.state" font-size="22" class="text-weight-b" />
+          <x-button size="small" :disabled="busy || loading" @click="load">刷新订单</x-button>
+        </view>
+        <x-cell :title="order.pickup" icon="radio-button-line" :link="false" />
+        <x-cell :title="order.dropoff" icon="map-pin-2-line" :link="false" />
+        <view class="metric-row mb-10">
+          <x-text :label="order.passengers + ' 人同行'" color="#526a63" font-size="13" />
+          <x-money :model-value="order.amountMinor / 100" symbol-text=" 游戏币" symbol-position="right" font-family="D-DIN" />
+        </view>
+        <view v-if="controllable" class="admin-actions mb-12">
+          <x-button v-if="order.companyId" size="small" color="#f8eae5" font-color="#9a4328" :disabled="busy" @click="choose('emergency')">紧急停车</x-button>
+          <x-button v-if="order.companyId" size="small" :color="themeTint" :font-color="themePrimary" :disabled="busy" @click="choose('resume')">恢复运行</x-button>
+          <x-button size="small" :disabled="busy" @click="choose('cancel')">取消订单</x-button>
+        </view>
+        <view v-if="controllable && canPhysical" class="mb-12">
+          <x-button size="small" :disabled="busy" @click="choose('open_doors')">开门并保持停车</x-button>
+          <x-button size="small" :disabled="busy" @click="choose('close_doors')">关门</x-button>
+          <x-button size="small" :disabled="busy" @click="choose('destroy')">手动清除空车</x-button>
+        </view>
+        <view v-if="order.telemetry.obstruction" class="mb-12">
+          <x-text :label="'前方占用已等待 ' + order.telemetry.obstruction.waitingSeconds + ' 秒'" font-size="15" />
+          <x-text :label="order.telemetry.obstruction.explanation" font-size="12" />
+          <view v-for="blocker in order.telemetry.obstruction.blockers" :key="blocker.vehicleId">
+            <x-text :label="'车辆 ' + blocker.vehicleId + ' · ' + (blocker.orderId ?? '未匹配订单')" font-size="12" />
+            <x-button v-if="canPhysical && blocker.returning && blocker.orderId" size="small" :disabled="busy" @click="choose('clear_blocker', blocker.orderId ?? '')">核验并清除此回库车</x-button>
+          </view>
+        </view>
+        <x-text label="订单动态" font-size="17" class="text-weight-b" />
+        <x-empty v-if="!events.length" :loading="false" :empty="true" :show-btn="false" title="暂无动态" img-height="70" />
+        <x-cell v-for="(event, index) in events" :key="index" :title="String(event['event_type'])"
+          :desc="formatDate(Number(event['created_at']))" :link="false" />
+      </view>
+      <view v-else>
+        <x-empty :loading="false" :empty="true" :show-btn="false" :title="error || '订单不可用'" img-height="86" />
+        <x-button :block="true" @click="start">重试</x-button>
+      </view>
+    </view>
+  </MapSheet>
+  <x-modal v-model:show="confirming" :title="'确认' + (labels[action] ?? '') + '？'" height="auto"
+    confirm-text="提交调度" @confirm="control">
+    <x-text label="调度操作会写入审计日志。车辆行驶中或车上有乘客时，取消可能需要调度员协助。" font-size="14" color="#526a63" />
+  </x-modal>
+</template>
+
+<style scoped>
+.admin-trip { padding: 0 16px 20px; }
+.admin-actions { flex-direction: row; justify-content: space-between; }
+</style>

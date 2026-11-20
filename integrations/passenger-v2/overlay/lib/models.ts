@@ -18,10 +18,13 @@ export type Offer = {
   fare: Fare; rules: Rules; route: Route
 }
 export type Telemetry = {
+  assistanceRequired?: boolean
+  obstruction?: { waitingSeconds: number; thresholdSeconds: number; explanation: string; blockers: { vehicleId: string; orderId?: string; returning?: boolean }[] } | null
   stage?: string; stageLabel?: string; geometry?: Geometry; position?: Position
   etaPickupSeconds?: number | null; etaDropoffSeconds?: number | null
 }
 export type Order = {
+  vehiclePending?: boolean
   checkoutUrl?: string; demonstration?: boolean
   id: string; revision: number; state: string; pickup: string; dropoff: string
   passengers: number; companyId: string | null; amountMinor: number; paidMinor: number

@@ -196,6 +196,34 @@ test(
     try {
       await mapFixture(page);
       await page.goto(server.base);
+      await expect(page.locator('.map-back .parentButton')).toBeVisible();
+      for (const [width, height] of [
+        [320, 640],
+        [390, 844],
+        [768, 1024],
+      ]) {
+        await page.setViewportSize({ width, height });
+        await expect
+          .poll(async () =>
+            page
+              .locator('.map-back .parentButton, .zoom-controls .parentButton')
+              .evaluateAll((buttons) =>
+                buttons.map((button) => {
+                  const b = button.getBoundingClientRect(),
+                    icon = button.querySelector('.face')?.getBoundingClientRect();
+                  return (
+                    b.width >= 44 &&
+                    b.height >= 44 &&
+                    !!icon &&
+                    Math.abs(icon.left + icon.width / 2 - (b.left + b.width / 2)) < 1 &&
+                    Math.abs(icon.top + icon.height / 2 - (b.top + b.height / 2)) < 1
+                  );
+                }),
+              ),
+          )
+          .toEqual([true, true, true, true]);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
       await page.getByText('3D', { exact: true }).click();
       await expect(page.getByText(/3D 暂不可用，已恢复 2D/)).toBeVisible();
       await expect(page.locator('iframe')).toHaveCount(0);
@@ -206,3 +234,89 @@ test(
     }
   },
 );
+
+test('管理员日志搜索和车辆控制携带正确参数', { timeout: 30000 }, async () => {
+  const server = await serve('admin/dist'),
+    browser = await launch();
+  const page = await browser.newPage();
+  page.setDefaultTimeout(5000);
+  let query = '',
+    command;
+  const order = {
+    id: 'ops-order',
+    state: 'NEEDS_ATTENTION',
+    companyId: 'jade',
+    pickup: 'A',
+    dropoff: 'B',
+    passengers: 1,
+    amountMinor: 600,
+    paidMinor: 0,
+    createdAt: 1,
+    offers: [],
+    telemetry: {
+      assistanceRequired: true,
+      obstruction: {
+        waitingSeconds: 65,
+        thresholdSeconds: 60,
+        explanation: 'MTR 前方轨道占用',
+        blockers: [{ vehicleId: '101', orderId: 'return-order', returning: true }],
+      },
+    },
+  };
+  try {
+    await page.route('**/api/**', async (route) => {
+      const request = route.request(),
+        url = new URL(request.url());
+      let data = [];
+      if (url.pathname === '/api/me') data = { user, demo: false };
+      if (url.pathname === '/api/admin/system_logs') {
+        query = url.search;
+        data = [
+          {
+            id: 'log',
+            created_at: 1700000000000,
+            channel: 'mod',
+            event: 'command_finished',
+            request_id: 'alpha',
+            command: 'taxi.quote',
+            result: 'timeout',
+            explanation: '模组未在时限内响应',
+          },
+        ];
+      }
+      if (url.pathname === '/api/admin/orders') data = [order];
+      if (url.pathname === '/api/admin/orders/ops-order/events') data = { items: [] };
+      if (url.pathname === '/api/admin/orders/ops-order/control') {
+        command = request.postDataJSON();
+        assert.equal(request.headers()['x-csrf-token'], user.csrf);
+        data = { ok: true };
+      }
+      await route.fulfill({ json: data });
+    });
+    await page.goto(server.base + '/#/system_logs');
+    await expect(page.getByText('模组未在时限内响应', { exact: true })).toBeVisible();
+    await page.getByLabel('搜索系统日志').fill('alpha');
+    await page.getByLabel('搜索系统日志').press('Enter');
+    await expect.poll(() => new URLSearchParams(query).get('q')).toBe('alpha');
+    await page.screenshot({ path: artifacts + '/system-log-filters.png', fullPage: true });
+    await page.getByText('订单与调度', { exact: true }).first().click();
+    await page.getByText('查看行程', { exact: true }).click();
+    await expect(page.getByText('前方占用：等待调度协助', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '开门并保持停车', exact: true }).click();
+    await page.locator('.ant-modal-confirm-btns .ant-btn-primary').click();
+    await expect.poll(() => command?.action).toBe('open_doors');
+    await page.getByText('查看行程', { exact: true }).click();
+    await page.getByRole('button', { name: '核验并清除此空载回库车', exact: true }).click();
+    await page.locator('.ant-modal-confirm-btns .ant-btn-primary').click();
+    await expect
+      .poll(() => command)
+      .toEqual({ action: 'clear_blocker', targetOrderId: 'return-order' });
+  } catch (error) {
+    await page.screenshot({ path: artifacts + '/operations-error.png', fullPage: true });
+    console.error((await page.locator('body').innerText()).slice(-2200));
+    throw error;
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});

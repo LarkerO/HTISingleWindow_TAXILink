@@ -49,9 +49,19 @@ final class Bridge
             ['Authorization: Bearer ' . $token],
         );
         if (!($response['ok'] ?? false)) {
+            $messages = [
+                'VEHICLE_MOVING' => '车辆正在移动，请先紧急停车并确认静止后重试',
+                'VEHICLE_OCCUPIED' => '车上仍有乘客，必须全部下车后才能清除车辆',
+                'PASSENGERS_DISEMBARKING' => '下车点仍有乘客，请等待全部下车后再关门',
+                'BLOCKER_CHANGED' => '占用关系已变化或信息过期，请刷新订单后重新核验',
+                'NOT_RETURNING' => '目标车辆已不处于回库阶段，不能按回库车清除',
+                'VEHICLE_NOT_READY' => '车辆尚未就绪或已结束，请刷新订单状态',
+                'UNKNOWN_COMMAND' => '游戏模组尚未支持此操作，请同步更新 TAXILink 模组',
+            ];
             throw new AppError(
                 $response['error']['code'] ?? 'MOD_ERROR',
-                $response['error']['message'] ?? '模组请求失败',
+                $messages[$response['error']['code'] ?? ''] ??
+                    ($response['error']['message'] ?? '模组请求失败'),
                 409,
             );
         }

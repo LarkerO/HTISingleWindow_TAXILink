@@ -41,12 +41,14 @@ export async function uploadImage(
   file: File,
   purpose: string,
   companyId = '',
+  provider = '',
 ): Promise<{ url: string }> {
   if (file.size > 5 * 1024 * 1024) throw new Error('图片不能超过 5MB');
   const body = new FormData();
   body.append('file', file);
   body.append('purpose', purpose);
   body.append('companyId', companyId);
+  if (provider) body.append('provider', provider);
   const response = await fetch('/api/admin/media', {
     method: 'POST',
     credentials: 'include',

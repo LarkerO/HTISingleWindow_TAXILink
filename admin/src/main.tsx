@@ -1,3 +1,4 @@
+import SystemLogsPage from './SystemLogsPage';
 import CashierSettingsPage from './CashierSettingsPage';
 import AnnouncementsPage from './AnnouncementsPage';
 import MediaSettingsPage from './MediaSettingsPage';
@@ -63,7 +64,7 @@ type RecordData = Record<string, any>;
 const menus = [
   { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
   { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
-  { path: '/media', name: 'COS 图片存储', icon: <SettingOutlined /> },
+  { path: '/media', name: '对象存储', icon: <SettingOutlined /> },
   { path: '/passenger-clients', name: '乘客端接入', icon: <SettingOutlined /> },
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
   { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
@@ -187,7 +188,7 @@ function AdminApp() {
       if (r === 'depot_authorizations') {
         setDepotRows(await api('/admin/catalog/depots'));
       } else if (r === 'system_logs') {
-        setSystemLogs(await api('/admin/system_logs'));
+        setRows([]);
         setSystemLogError('');
       } else if (r === 'overview' || r === 'orders') {
         setRows(await api('/admin/orders' + (company ? '?companyId=' + company : '')));
@@ -235,7 +236,7 @@ function AdminApp() {
     load();
   }, [user, page, company, companies]);
   useEffect(() => {
-    if (!user || !['/orders', '/overview', '/system_logs'].includes(page)) return;
+    if (!user || !['/orders', '/overview'].includes(page)) return;
     const t = setInterval(load, 7000);
     return () => clearInterval(t);
   }, [user, page, company]);
@@ -355,15 +356,18 @@ function AdminApp() {
       fail(e);
     }
   }
-  async function control(action: string) {
+  async function control(action: string, targetOrderId?: string) {
     modal.confirm({
       title: '确认执行调度操作？',
       content:
-        '操作将记录审计日志。有人乘坐时取消需要先下车；模组重启后已回收的订单将按失败关闭，费用归零并原路退款。',
+        action === 'destroy' || action === 'clear_blocker'
+          ? '清除仅允许空载、静止车辆，并恢复其专用车厂。占用关系和回库阶段会由模组重新核验。移动中请先紧急停车；不会强制踢出乘客。'
+          : '操作将记录审计日志。开门将保持停车；下车点仍有人时不能关门。',
       onOk: async () => {
         try {
-          await api('/admin/orders/' + drawerOrder?.id + '/control', { action });
+          await api('/admin/orders/' + drawerOrder?.id + '/control', { action, targetOrderId });
           message.success('指令已提交');
+          setDrawerOrder(null);
           load();
         } catch (e) {
           fail(e);
@@ -788,98 +792,7 @@ function AdminApp() {
             />
           </Card>
         ) : page === '/system_logs' ? (
-          systemLogError ? (
-            <Alert
-              showIcon
-              type="error"
-              message="无法读取系统日志"
-              description={systemLogError}
-              action={
-                <Button loading={loading} onClick={load}>
-                  重试
-                </Button>
-              }
-            />
-          ) : (
-            <Card
-              title="WebSocket 系统日志"
-              extra={
-                <Button loading={loading} onClick={load}>
-                  刷新
-                </Button>
-              }
-            >
-              <Table<RecordData>
-                rowKey="id"
-                dataSource={systemLogs}
-                loading={loading}
-                pagination={{ pageSize: 25 }}
-                scroll={{ x: 960 }}
-                columns={[
-                  {
-                    title: '时间',
-                    dataIndex: 'created_at',
-                    render: (_, row) =>
-                      new Date(Number(row.created_at)).toLocaleString('zh-CN', {
-                        fractionalSecondDigits: 3,
-                        year: 'numeric',
-                        month: '2-digit',
-                        day: '2-digit',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      }),
-                  },
-                  {
-                    title: '通道',
-                    dataIndex: 'channel',
-                    render: logLabel({ mod: '模组', passenger: '乘客端' }),
-                  },
-                  {
-                    title: '事件',
-                    dataIndex: 'event',
-                    render: logLabel({
-                      connected: '连接成功',
-                      connection_rejected: '连接拒绝',
-                      disconnected: '断开连接',
-                      message_rejected: '消息拒绝',
-                      command_sent: '指令下发',
-                      command_finished: '指令结束',
-                    }),
-                  },
-                  { title: '连接 ID', dataIndex: 'connection_id' },
-                  { title: '指令', dataIndex: 'command' },
-                  {
-                    title: '请求 ID',
-                    dataIndex: 'request_id',
-                    render: (value: string | null) =>
-                      value ? <Typography.Text copyable>{value}</Typography.Text> : '—',
-                  },
-                  {
-                    title: '总耗时',
-                    dataIndex: 'duration_ms',
-                    render: (_, row) => (row.duration_ms == null ? '—' : row.duration_ms + ' ms'),
-                  },
-                  {
-                    title: '结果',
-                    dataIndex: 'result',
-                    render: logLabel({
-                      success: '成功',
-                      mod_error: '模组返回错误',
-                      timeout: '超时',
-                      send_failed: '下发失败',
-                      disconnected: '连接断开',
-                      handshake_invalid: '握手认证失败',
-                      subscription_timeout: '订阅超时',
-                      message_invalid: '消息验证失败',
-                      origin_or_path: '来源或路径不匹配',
-                      session_required: '会话无效',
-                    }),
-                  },
-                ]}
-              />
-            </Card>
-          )
+          <SystemLogsPage />
         ) : page === '/overview' ? (
           <>
             <div className="overview-banner">
@@ -1410,7 +1323,49 @@ function AdminApp() {
               </Button>
               <Button onClick={() => control('resume')}>恢复运行</Button>
               <Button onClick={() => control('cancel')}>取消／再次尝试取消</Button>
+              {(user.platformAdmin ||
+                user.memberships.some(
+                  (m) => m.company_id === drawerOrder.companyId && m.role === 'admin',
+                )) && (
+                <>
+                  <Button onClick={() => control('open_doors')}>开门并保持停车</Button>
+                  <Button onClick={() => control('close_doors')}>关门</Button>
+                  <Button danger onClick={() => control('destroy')}>
+                    手动清除空车
+                  </Button>
+                </>
+              )}
             </Space>
+            {drawerOrder.telemetry?.obstruction && (
+              <Card
+                size="small"
+                title={
+                  drawerOrder.telemetry.assistanceRequired ? '前方占用：等待调度协助' : '前方占用'
+                }
+              >
+                <p>
+                  已等待 {drawerOrder.telemetry.obstruction.waitingSeconds} 秒，阈值{' '}
+                  {drawerOrder.telemetry.obstruction.thresholdSeconds} 秒。
+                </p>
+                <p>{drawerOrder.telemetry.obstruction.explanation}</p>
+                {(drawerOrder.telemetry.obstruction.blockers ?? []).map((blocker: RecordData) => (
+                  <div key={blocker.vehicleId}>
+                    <p>
+                      车辆 {blocker.vehicleId} · {blocker.orderId ?? '未匹配 TAXILink 订单'} ·{' '}
+                      {blocker.returning ? '回库车' : '其他车辆'}
+                    </p>
+                    {blocker.returning && blocker.orderId && (
+                      <Button danger onClick={() => control('clear_blocker', blocker.orderId)}>
+                        核验并清除此空载回库车
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                {!drawerOrder.telemetry.obstruction.blockers?.length && (
+                  <p>未定位到具体车辆，可能是信号占用；请在游戏内核查。</p>
+                )}
+              </Card>
+            )}
             <h3>订单动态</h3>
             {orderEvents.map((e, i) => (
               <div key={i} className="event-row">

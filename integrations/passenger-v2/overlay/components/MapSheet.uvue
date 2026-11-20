@@ -1,0 +1,67 @@
+<script setup lang="ts">
+import { themeBorder, themePrimary } from '../lib/theme'
+import { computed, ref } from 'vue'
+import BlueMap from './BlueMap.uvue'
+import type { Geometry, Position } from '../lib/models'
+
+type Props = { geometry?: Geometry; position?: Position; peek: number; title: string; back?: string; contained?: boolean; riderDistance?: boolean }
+const props = defineProps<Props>()
+const expanded = ref<boolean>(false)
+const fraction = ref<number>(0)
+const windowInfo = uni.getWindowInfo()
+const width = ref<number>(windowInfo.windowWidth)
+const height = ref<number>(windowInfo.windowHeight)
+const top = ref<number>(windowInfo.statusBarHeight + 8)
+const peekPanel = computed((): number => Math.min(props.peek, Math.round(height.value * 0.63)))
+const maxPanel = computed((): number => Math.max(peekPanel.value + 20, Math.round(height.value * 0.67)))
+const panelHeight = computed((): number => peekPanel.value + (maxPanel.value - peekPanel.value) * fraction.value)
+const mapHeight = computed((): number => Math.max(88, height.value - panelHeight.value))
+
+function resize(): void {
+  const size = uni.getWindowInfo()
+  width.value = size.windowWidth
+  height.value = size.windowHeight
+  top.value = size.statusBarHeight + 8
+}
+function navigate(): void {
+  const fallback = props.back
+  if (fallback) uni.navigateBack({ fail: () => { uni.reLaunch({ url: fallback }) } })
+  else uni.navigateTo({ url: '/pages/profile' })
+}
+function changeHeight(value: number): void {
+  fraction.value = Math.max(0, Math.min(1, value / 100))
+}
+onResize(resize)
+</script>
+
+<template>
+  <view class="map-shell">
+    <BlueMap :width="width" :height="mapHeight" :fit-height="height - peekPanel" :control-top="top + 56"
+      :geometry="geometry" :position="position" :rider-distance="riderDistance ?? false" />
+    <view class="map-title" :style="{ top: top + 'px' }">
+      <x-blur-u class="title-blur" :blur="16" bg-color="rgba(255,255,255,0.82)">
+        <view class="title-content">
+          <text v-if="!back" class="map-brand" :style="{ color: themePrimary }">{{ title }}</text>
+          <x-text v-else :label="title" :color="themePrimary" font-size="17" class="text-weight-b" />
+        </view>
+      </x-blur-u>
+    </view>
+    <view class="map-back" :style="{ top: top + 'px' }">
+      <x-button :icon="back ? 'arrow-left-line' : 'user-3-line'" color="#ffffff" :font-color="themePrimary"
+        :icon-btn="true" icon-size="24px" width="44px" height="44px" round="22px" @click="navigate" />
+    </view>
+  </view>
+  <x-float-drawer v-model:show="expanded" :size="peekPanel + 'px'" :max-height="maxPanel + 'px'"
+    :only-header="true" :disabled-scroll="contained ?? false" content-margin="0px" round="26" :action-color="themeBorder" @heightChange="changeHeight">
+    <slot :panel-height="panelHeight"></slot>
+  </x-float-drawer>
+</template>
+
+<style scoped>
+.map-shell { background-color: #dfece7; flex: 1; }
+.map-title { position: absolute; left: 50%; margin-left: -75px; width: 150px; height: 44px; border-radius: 22px; overflow: hidden; z-index: 10; }
+.title-blur { width: 150px; height: 44px; }
+.title-content { height: 44px; align-items: center; justify-content: center; }
+.map-brand { font-family: 'D-DIN-Bold'; font-size: 21px; }
+.map-back { position: absolute; left: 12px; width: 44px; height: 44px; align-items: center; justify-content: center; z-index: 11; }
+</style>

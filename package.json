@@ -9,7 +9,7 @@
     "dev:admin": "npm run dev -w admin",
     "dev:passenger": "npm run dev -w passenger",
     "build": "npm run build --workspaces",
-    "test": "php backend/tests/domain.php && php backend/tests/bootstrap.php && npm run test:oauth && npm run test:quotes && npm run test:resilience",
+    "test": "php backend/tests/domain.php && php backend/tests/bootstrap.php && php backend/tests/operations-storage.php && npm run test:oauth && npm run test:quotes && npm run test:resilience",
     "test:cashier": "php backend/tests/cashier.php",
     "test:database": "php backend/tests/database.php",
     "test:oauth": "node --test tests/oauth/*.test.mjs",

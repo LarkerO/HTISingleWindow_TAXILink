@@ -126,12 +126,12 @@ final class Demo
                         'stationId' => $id,
                         'position' => ['x' => $i * 100, 'y' => 64, 'z' => $i * 80],
                     ];
-                };
+                }
             }
             if ($kind === 'stations') {
                 foreach (['101', '102', '103', '104'] as $id) {
                     $items[] = ['id' => $id, 'name' => '车站 ' . $id];
-                };
+                }
             }
             if ($kind === 'depots') {
                 foreach (['201', '202'] as $id) {
@@ -141,7 +141,7 @@ final class Demo
                         'sidingCount' => 1,
                         'allowedForTaxi' => true,
                     ];
-                };
+                }
             }
             if ($kind === 'sidings') {
                 foreach (['301', '302'] as $i => $id) {
@@ -150,7 +150,7 @@ final class Demo
                         'depotId' => (string) (201 + $i),
                         'name' => '停车轨道 ' . $id,
                     ];
-                };
+                }
             }
             return ['items' => $items, 'nextOffset' => null, 'revision' => 'demo'];
         }
@@ -178,6 +178,13 @@ final class Demo
             throw new AppError('ORDER_NOT_FOUND', '订单尚未派车', 404);
         }
         $age = time() - (int) $r['created_at'];
+        if ($type === 'taxi.clear_returning') {
+            throw new AppError(
+                'BLOCKER_CHANGED',
+                '演示模式没有真实轨道占用，不能清除关联车辆',
+                409,
+            );
+        }
         if ($type === 'taxi.depart') {
             if ($age < 8 || ($r['departed_at'] ?? null) !== null || $age >= 20) {
                 throw new AppError('NOT_AT_PICKUP', '车辆尚未停靠或已经出发', 409);
@@ -204,6 +211,16 @@ final class Demo
                         : ($tripAge < 24
                             ? 'WAITING_DROPOFF'
                             : 'RETURNING')));
+        if ($type === 'taxi.doors') {
+            if (!in_array($stage, ['WAITING_PICKUP', 'WAITING_DROPOFF'], true)) {
+                throw new AppError('VEHICLE_MOVING', '演示车辆尚未停靠', 409);
+            }
+            return [
+                'orderId' => $r['id'],
+                'doorTarget' => $p['state'] ?? 'closed',
+                'demonstration' => true,
+            ];
+        }
         $progress =
             $tripAge < 0
                 ? min(850, ($age / 8) * 850)

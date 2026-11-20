@@ -73,6 +73,8 @@ final class ModGateway
                     'taxi.destroy',
                     'taxi.passengers',
                     'taxi.control',
+                    'taxi.doors',
+                    'taxi.clear_returning',
                     'mtr.depots',
                     'mtr.sidings',
                     'mtr.stations',
@@ -98,9 +100,14 @@ final class ModGateway
                 ];
                 $payload = $this->wire->sign('gateway', Db::json($frame));
                 $started = hrtime(true);
-                $timer = Timer::add(15, function () use ($id): void {
-                    $this->finish($id, 504, ['error' => 'MOD_RESPONSE_TIMEOUT'], 'timeout');
-                }, [], false);
+                $timer = Timer::add(
+                    15,
+                    function () use ($id): void {
+                        $this->finish($id, 504, ['error' => 'MOD_RESPONSE_TIMEOUT'], 'timeout');
+                    },
+                    [],
+                    false,
+                );
                 $this->pending[$id] = [$c, $timer, $started, $frame['type'], $this->mod->id];
                 if ($this->mod->send($payload) === false) {
                     $this->finish($id, 503, ['error' => 'MOD_SEND_FAILED'], 'send_failed');
@@ -128,7 +135,12 @@ final class ModGateway
             function () use ($c): void {
                 if ($this->mod !== $c) {
                     if (isset($this->authorized[$c->id])) {
-                        SystemLog::record('mod', 'connection_rejected', $c->id, result: 'subscription_timeout');
+                        SystemLog::record(
+                            'mod',
+                            'connection_rejected',
+                            $c->id,
+                            result: 'subscription_timeout',
+                        );
                     }
                     $c->close();
                 }
@@ -196,7 +208,12 @@ final class ModGateway
                 throw new \RuntimeException();
             }
             if (($m['type'] ?? '') === 'response' && isset($this->pending[$m['requestId'] ?? ''])) {
-                $this->finish($m['requestId'], 200, $m, ($m['ok'] ?? false) === true ? 'success' : 'mod_error');
+                $this->finish(
+                    $m['requestId'],
+                    200,
+                    $m,
+                    ($m['ok'] ?? false) === true ? 'success' : 'mod_error',
+                );
             } elseif (
                 str_starts_with($m['type'] ?? '', 'ride.') ||
                 ($m['type'] ?? '') === 'taxi.telemetry'
@@ -209,8 +226,12 @@ final class ModGateway
                 ]);
             }
         } catch (\Throwable) {
-            SystemLog::record('mod', $this->mod === $c ? 'message_rejected' : 'connection_rejected',
-                $c->id, result: 'message_invalid');
+            SystemLog::record(
+                'mod',
+                $this->mod === $c ? 'message_rejected' : 'connection_rejected',
+                $c->id,
+                result: 'message_invalid',
+            );
             $c->close();
         }
     }
@@ -234,7 +255,15 @@ final class ModGateway
         unset($this->pending[$id]);
         $duration = intdiv(hrtime(true) - $started, 1_000_000);
         Timer::del($timer);
-        SystemLog::record('mod', 'command_finished', $connection, $id, $command, $duration, $result);
+        SystemLog::record(
+            'mod',
+            'command_finished',
+            $connection,
+            $id,
+            $command,
+            $duration,
+            $result,
+        );
         if ($waiting !== null) {
             $this->reply($waiting, $status, $response);
         }

@@ -2,6 +2,10 @@
 
 API 前缀 `/api`，JSON 请求/响应。同源部署，HttpOnly Cookie `tl_session` 鉴权；写请求还须携带 `/me` 返回的 `X-CSRF-Token`。错误格式 `{error:{code,message}}`，使用对应 HTTP 状态码。
 
+第二批扩展：图片设置/上传支持 `provider=cos|oss|qiniu|s3`，保存配置可带 `activate:true`，已登录用户通过 `GET /media/providers` 获取可选项。管理订单 `/admin/orders/{id}/control` 新增 `open_doors`、`close_doors`、`destroy`、`clear_blocker`，最后一项须带 `targetOrderId`，物理控制检查对应企业管理员权限；跨企业目标独立检查权限。模组原子核验后才清除，不能强制清除有人或移动的车辆。
+
+`GET /admin/system_logs` 接受 `q`、`channel`、`event`、`result`、`command`、毫秒时间范围 `from/to`、`hideRoutine=1`；返回数组并增加 `explanation`。关键词搜索包含隐藏的常规记录。订单管理视图新增 `vehiclePending`，遥测增加 `assistanceRequired`、`obstruction`、`dropoffReleased`。乘客视图隐藏其他占用订单标识。详见 [运营接入说明](OPERATIONS_PENDING_20261120.md)。
+
 待发布的多端接入：`GET/POST /admin/passenger-clients` 仅平台管理员可用，POST 为 `{origins:["https://passv2.example.com"]}`。返回 `{origins,primary}`；原 APP_ORIGIN 和可选 PASSENGER_ORIGINS 始终保留。新乘客端登录使用 `/auth/start?clientOrigin=<当前源>&returnTo=<本地路径>`，需在 Portal 登记该源的 `/api/auth/callback`，来源在服务端 state 中绑定；HTTP 与 WebSocket 共用来源白名单。
 
 `GET/POST /admin/media/settings` 仅平台管理员可用，POST 为 `{bucket,region,publicUrl,secretId,secretKey}`。凭据留空保留现有值；返回只含公开配置、`configured`、`secretIdConfigured`、`secretKeyConfigured`、`maxBytes`，不返回凭据。数据库保存加密配置后即时生效，优先于旧环境变量。

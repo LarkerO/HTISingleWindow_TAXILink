@@ -320,6 +320,25 @@ final class Dispatch
             $state = 'ACTIVE';
         }
         $phase = $fresh ? $data['phase'] ?? '' : '';
+        if (
+            $fresh &&
+            $phase === 'ACTIVE' &&
+            array_key_exists('assistanceRequired', $data) &&
+            !in_array($state, ['FINALIZING', 'CANCEL_REQUESTED'], true)
+        ) {
+            if (($data['assistanceRequired'] ?? false) === true) {
+                if ($state !== 'NEEDS_ATTENTION') {
+                    $telemetry['_attentionReason'] = 'obstruction';
+                }
+                $state = 'NEEDS_ATTENTION';
+            } elseif (
+                $state === 'NEEDS_ATTENTION' &&
+                ($telemetry['_attentionReason'] ?? '') === 'obstruction'
+            ) {
+                $state = 'ACTIVE';
+                unset($telemetry['_attentionReason']);
+            }
+        }
         $passengerDone =
             $type === 'reconcile.final' &&
             $phase === 'ACTIVE' &&
@@ -327,6 +346,7 @@ final class Dispatch
             ($start !== null || ($data['stage'] ?? '') === 'RETURNING') &&
             (($data['stage'] ?? '') === 'RETURNING' ||
                 (($data['stage'] ?? '') === 'WAITING_DROPOFF' &&
+                    ($data['dropoffReleased'] ?? true) &&
                     ($telemetry['_everOnboard'] ?? false)));
         if ($phase !== '' && $o['candidate_id']) {
             Db::run(

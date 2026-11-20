@@ -309,9 +309,9 @@ onMounted(() => {
       </view>
     </view>
     <view v-if="map" class="zoom-controls">
-      <x-button width="36" height="36" color="#ffffff" :font-color="themePrimary" @click="changeZoom(1.35)">＋</x-button>
-      <x-button width="36" height="36" color="#ffffff" :font-color="themePrimary" @click="changeZoom(0.74)">－</x-button>
-      <x-button width="36" height="36" icon="focus-3-line" color="#ffffff" :font-color="themePrimary" @click="focus" />
+      <view class="zoom-button"><x-button :icon-btn="true" icon="add-line" icon-size="24px" width="44px" height="44px" round="18px" color="#ffffff" :font-color="themePrimary" @click="changeZoom(1.35)" /></view>
+      <view class="zoom-button"><x-button :icon-btn="true" icon="subtract-line" icon-size="24px" width="44px" height="44px" round="18px" color="#ffffff" :font-color="themePrimary" @click="changeZoom(0.74)" /></view>
+      <view class="zoom-button"><x-button :icon-btn="true" icon-size="24px" width="44px" height="44px" round="18px" icon="focus-3-line" color="#ffffff" :font-color="themePrimary" @click="focus" /></view>
     </view>
     <view v-if="map" class="attribution">
       <x-text label="BlueMap" font-size="11" color="#526a63" />
@@ -343,7 +343,8 @@ onMounted(() => {
 .map-state { flex: 1; justify-content: center; align-items: center; }
 .map-controls { position: absolute; top: 12px; left: 12px; flex-direction: row; align-items: center; z-index: 2; }
 .map-modes { width: 84px; }
-.zoom-controls { position: absolute; right: 10px; bottom: 38px; gap: 7px; z-index: 2; }
+.zoom-controls { position: absolute; right: 12px; bottom: 50px; width: 44px; z-index: 2; }
+.zoom-button { width: 44px; height: 44px; margin-top: 8px; align-items: center; justify-content: center; }
 .attribution { position: absolute; left: 10px; bottom: 38px; background-color: #ffffff; padding: 3px 7px; border-radius: 6px; }
 .map-stop { position: absolute; width: 120px; align-items: center; background-color: #ffffff; border-radius: 7px; padding: 3px 2px; }
 </style>
