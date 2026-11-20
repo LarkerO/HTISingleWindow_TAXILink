@@ -196,6 +196,9 @@ final class Db
             'announcements' =>
                 'id VARCHAR(64) PRIMARY KEY, title VARCHAR(120) NOT NULL, markdown MEDIUMTEXT NOT NULL, placements TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0, listed INTEGER NOT NULL DEFAULT 1, login_required INTEGER NOT NULL DEFAULT 0, updated_at BIGINT NOT NULL',
             'cashier_settings' => 'id VARCHAR(64) PRIMARY KEY, config TEXT NOT NULL',
+            'system_settings' => 'id VARCHAR(64) PRIMARY KEY, config TEXT NOT NULL',
+            'route_cache' =>
+                'id VARCHAR(64) PRIMARY KEY, config MEDIUMTEXT NOT NULL, expires BIGINT NOT NULL',
             'cashier_trades' =>
                 'id VARCHAR(64) PRIMARY KEY, order_id VARCHAR(64) NOT NULL, config TEXT NOT NULL, amount BIGINT NOT NULL, remote_id VARCHAR(64), status VARCHAR(32) NOT NULL, credited BIGINT NOT NULL DEFAULT 0, refunded BIGINT NOT NULL DEFAULT 0, refund_id VARCHAR(64), refund_amount BIGINT NOT NULL DEFAULT 0, created_at BIGINT NOT NULL',
             'dispatch_sequence' => 'id INTEGER PRIMARY KEY, ticket BIGINT NOT NULL',
@@ -253,6 +256,9 @@ final class Db
             }
         }
         $oauthColumns = self::columns('oauth_states');
+        if (!in_array('client_origin', $oauthColumns, true)) {
+            self::pdo()->exec('ALTER TABLE oauth_states ADD COLUMN client_origin TEXT');
+        }
         if (!in_array('return_to', $oauthColumns, true)) {
             self::pdo()->exec('ALTER TABLE oauth_states ADD COLUMN return_to TEXT');
         }

@@ -32,23 +32,21 @@ final class Booking
         if (!$from || !$to) {
             throw new AppError('POINT_TRACK_REQUIRED', '上车点或下车点尚未配置停车轨道');
         }
-        $offers = [];
-        $unavailable = [];
+        $candidates = [];
+        $requests = [];
         foreach ($companies as $company) {
             $rules = Fare::validate(Db::data($company['fare']));
             $vehicles = Db::all('SELECT * FROM vehicles WHERE company_id=? AND capacity>=?', [
                 $company['id'],
                 $count,
             ]);
-            $found = false;
             foreach (
                 Db::all('SELECT * FROM centers WHERE company_id=? AND enabled=1', [$company['id']])
                 as $center
             ) {
                 foreach (Db::data($center['depots']) as $depot) {
                     foreach ($vehicles as $vehicle) {
-                        $best = null;
-                        // One bad track pair must not suppress the other pairs for this vehicle.
+                        $pairs = [];
                         foreach ($from as $a) {
                             foreach ($to as $b) {
                                 if ($a['platform_id'] === $b['platform_id']) {
@@ -62,79 +60,129 @@ final class Booking
                                     'passengerCount' => $count,
                                     'lowSpeedKmh' => 10,
                                 ]);
-                                try {
-                                    $route = Bridge::command('taxi.quote', $params);
-                                    if (
-                                        !isset(
-                                            $route['pickupDistanceMeters'],
-                                            $route['returnDistanceMeters'],
-                                        )
-                                    ) {
-                                        throw new AppError(
-                                            'MOD_UPGRADE_REQUIRED',
-                                            '模组需要支持接客与回库里程',
-                                            409,
-                                        );
-                                    }
-                                    $fare = Fare::calculate(
-                                        $rules,
-                                        $route['distanceMeters'],
-                                        $route['estimatedSeconds'],
-                                        $route['pickupDistanceMeters'],
-                                        $route['returnDistanceMeters'],
-                                    );
-                                    $offer = [
-                                        'id' => Db::id(),
-                                        'companyId' => $company['id'],
-                                        'companyName' => $company['name'],
-                                        'companyImageUrl' => $company['image_url'] ?? '',
-                                        'centerId' => $center['id'],
-                                        'centerName' => $center['name'],
-                                        'vehicleId' => $vehicle['id'],
-                                        'vehicleName' => $vehicle['name'],
-                                        'vehicleImageUrl' => $vehicle['image_url'] ?? '',
-                                        'capacity' => (int) $vehicle['capacity'],
-                                        'rules' => $rules,
-                                        'route' => $route,
-                                        'fare' => $fare,
-                                        'params' => $params,
-                                    ];
-                                    if (
-                                        $best === null ||
-                                        $route['pickupDistanceMeters'] <
-                                            $best['route']['pickupDistanceMeters']
-                                    ) {
-                                        $best = $offer;
-                                    }
-                                } catch (AppError $e) {
-                                    if (
-                                        in_array(
-                                            $e->key,
-                                            [
-                                                'UPSTREAM_UNCERTAIN',
-                                                'GATEWAY_NOT_CONFIGURED',
-                                                'MOD_UPGRADE_REQUIRED',
-                                            ],
-                                            true,
-                                        )
-                                    ) {
-                                        throw $e;
-                                    }
-                                }
+                                $key = QuoteRoutes::key($params);
+                                $requests[$key] = $params;
+                                $pairs[] = $key;
                             }
                         }
-                        if ($best) {
-                            $offers[] = $best;
-                            $found = true;
-                        }
+                        $candidates[] = compact('company', 'center', 'vehicle', 'rules', 'pairs');
                     }
                 }
             }
-            if (!$found) {
+        }
+        // Interleave companies so one large operator cannot consume the whole deadline.
+        $grouped = [];
+        foreach ($candidates as $candidate) {
+            foreach ($candidate['pairs'] as $key) {
+                $grouped[$candidate['company']['id']][$key] = $requests[$key];
+            }
+        }
+        $ordered = [];
+        do {
+            $more = false;
+            foreach ($grouped as &$group) {
+                if (!$group) {
+                    continue;
+                }
+                $key = array_key_first($group);
+                $ordered[$key] = $group[$key];
+                unset($group[$key]);
+                $more = true;
+            }
+            unset($group);
+        } while ($more);
+        $routes = QuoteRoutes::fetch($ordered);
+        $offers = [];
+        $unavailable = [];
+        $found = [];
+        $pending = [];
+        $errors = [];
+        foreach ($candidates as $candidate) {
+            [
+                'company' => $company,
+                'center' => $center,
+                'vehicle' => $vehicle,
+                'rules' => $rules,
+                'pairs' => $pairs,
+            ] = $candidate;
+            $best = null;
+            foreach ($pairs as $key) {
+                $route = $routes[$key];
+                if ($route instanceof AppError) {
+                    $errors[] = $route;
+                    if (
+                        in_array(
+                            $route->key,
+                            [
+                                'QUOTE_TIMEOUT',
+                                'QUOTE_UNAVAILABLE',
+                                'QUOTE_UPSTREAM_TIMEOUT',
+                                'SERVER_BUSY',
+                                'UPSTREAM_INVALID_RESPONSE',
+                                'MOD_UPGRADE_REQUIRED',
+                            ],
+                            true,
+                        )
+                    ) {
+                        $pending[$company['id']] = true;
+                    }
+                    continue;
+                }
+                $fare = Fare::calculate(
+                    $rules,
+                    $route['distanceMeters'],
+                    $route['estimatedSeconds'],
+                    $route['pickupDistanceMeters'],
+                    $route['returnDistanceMeters'],
+                );
+                $offer = [
+                    'id' => Db::id(),
+                    'companyId' => $company['id'],
+                    'companyName' => $company['name'],
+                    'companyImageUrl' => $company['image_url'] ?? '',
+                    'centerId' => $center['id'],
+                    'centerName' => $center['name'],
+                    'vehicleId' => $vehicle['id'],
+                    'vehicleName' => $vehicle['name'],
+                    'vehicleImageUrl' => $vehicle['image_url'] ?? '',
+                    'capacity' => (int) $vehicle['capacity'],
+                    'rules' => $rules,
+                    'route' => $route,
+                    'fare' => $fare,
+                    'params' => $requests[$key],
+                ];
+                if (
+                    $best === null ||
+                    $route['pickupDistanceMeters'] < $best['route']['pickupDistanceMeters']
+                ) {
+                    $best = $offer;
+                }
+            }
+            if ($best) {
+                $offers[] = $best;
+                $found[$company['id']] = true;
+            }
+        }
+        if (!$offers && $pending) {
+            foreach ($errors as $error) {
+                if ($error->key === 'MOD_UPGRADE_REQUIRED') {
+                    throw $error;
+                }
+            }
+            throw new AppError(
+                'QUOTE_UNAVAILABLE',
+                '暂未取得可用报价，请稍后刷新；如持续失败，请联系管理员检查模组连接和线路',
+                503,
+            );
+        }
+        foreach ($companies as $company) {
+            if (!isset($found[$company['id']])) {
                 $unavailable[] = [
                     'companyId' => $company['id'],
                     'name' => $company['name'],
-                    'reason' => '暂无满足人数且全程连通的车型与轨道',
+                    'reason' => isset($pending[$company['id']])
+                        ? '报价尚未完成，请刷新重试'
+                        : '暂无满足人数且全程连通的车型与轨道',
                 ];
             }
         }
@@ -159,6 +207,8 @@ final class Booking
             'expires' => $expires,
             'offers' => array_map(self::publicOffer(...), $offers),
             'unavailable' => $unavailable,
+            'complete' => !$pending,
+            'warning' => $pending ? '部分线路报价尚未完成，已显示可用结果；可稍后刷新报价。' : '',
         ];
     }
     public static function publicOffer(array $o): array

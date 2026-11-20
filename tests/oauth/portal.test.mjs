@@ -16,6 +16,7 @@ test('HydCraft Portal OAuth 端到端协议契约', { timeout: 60000 }, async (t
   const redirects = [
     'https://taxi.test/api/auth/callback',
     'https://admin.taxi.test/api/auth/callback',
+    'https://v2.taxi.test/api/auth/callback',
   ];
   const codes = new Map(),
     tokens = new Map();
@@ -116,6 +117,7 @@ test('HydCraft Portal OAuth 端到端协议契约', { timeout: 60000 }, async (t
     DB_DSN: process.env.TAXILINK_TEST_DB_DSN || 'sqlite:' + join(directory, 'oauth.sqlite'),
     PLATFORM_ADMIN_SUB: '',
     APP_ORIGIN: 'https://taxi.test',
+    PASSENGER_ORIGINS: 'https://v2.taxi.test',
     ADMIN_ORIGIN: 'https://admin.taxi.test',
     PORTAL_ISSUER: `http://127.0.0.1:${server.address().port}`,
     PORTAL_CLIENT_ID: 'hydcraft_contract',
@@ -241,6 +243,35 @@ test('HydCraft Portal OAuth 端到端协议契约', { timeout: 60000 }, async (t
         );
       },
     );
+    await t.test('第二乘客端独立回调与会话、共享同一账号，拒绝未知来源', async () => {
+      const denied = await api.call({
+        path: '/api/auth/start?clientOrigin=https%3A%2F%2Fevil.test',
+      });
+      assert.equal(denied.status, 403);
+      const start = await api.call({
+        path: '/api/auth/start?clientOrigin=https%3A%2F%2Fv2.taxi.test&returnTo=%2Forders',
+        headers: { Host: 'admin.taxi.test' },
+      });
+      assert.equal(start.status, 302, start.body);
+      const authorization = await fetch(header(start, 'Location'), { redirect: 'manual' });
+      const callback = new URL(authorization.headers.get('location'));
+      assert.equal(callback.origin, 'https://v2.taxi.test');
+      const result = await api.call({
+        path: callback.pathname + callback.search,
+        headers: { Cookie: cookies(start)[0].split(';')[0] },
+      });
+      assert.equal(result.status, 302, result.body);
+      assert.equal(header(result, 'Location'), 'https://v2.taxi.test/orders');
+      const cookie = cookies(result)
+        .find((c) => c.startsWith('tl_session='))
+        .split(';')[0];
+      assert.notEqual(cookie, passengerCookie);
+      const me = JSON.parse(
+        (await api.call({ path: '/api/me', headers: { Cookie: cookie } })).body,
+      ).user;
+      assert.equal(me.id, firstUser.id);
+      assert.equal(me.firstLogin, firstUser.firstLogin);
+    });
     await t.test('错误 state、过期 state、拒绝授权与缺失授权码不触发换码', async () => {
       let request = await begin();
       const before = tokenCalls;

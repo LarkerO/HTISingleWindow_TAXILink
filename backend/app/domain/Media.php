@@ -4,19 +4,82 @@ namespace app\domain;
 
 final class Media
 {
-    public static function settings(): array
+    private static function config(): array
     {
+        $saved = Db::one('SELECT config FROM system_settings WHERE id=?', ['cos']);
+        if ($saved) {
+            return SettingsSecret::open($saved['config']);
+        }
         return [
-            'configured' =>
-                Env::get('COS_BUCKET') !== '' &&
-                Env::get('COS_REGION') !== '' &&
-                Env::get('COS_SECRET_ID') !== '' &&
-                Env::get('COS_SECRET_KEY') !== '',
             'bucket' => Env::get('COS_BUCKET'),
             'region' => Env::get('COS_REGION'),
             'publicUrl' => Env::get('COS_PUBLIC_URL'),
+            'secretId' => Env::get('COS_SECRET_ID'),
+            'secretKey' => Env::get('COS_SECRET_KEY'),
+        ];
+    }
+
+    public static function settings(): array
+    {
+        $c = self::config();
+        return [
+            'configured' =>
+                $c['bucket'] !== '' &&
+                $c['region'] !== '' &&
+                $c['secretId'] !== '' &&
+                $c['secretKey'] !== '',
+            'bucket' => $c['bucket'],
+            'region' => $c['region'],
+            'publicUrl' => $c['publicUrl'],
+            'secretIdConfigured' => $c['secretId'] !== '',
+            'secretKeyConfigured' => $c['secretKey'] !== '',
             'maxBytes' => 5 * 1024 * 1024,
         ];
+    }
+
+    public static function save(array $user, array $input): array
+    {
+        Auth::platform($user);
+        $old = self::config();
+        $c = [];
+        foreach (['bucket', 'region', 'publicUrl', 'secretId', 'secretKey'] as $field) {
+            if (!is_string($input[$field] ?? '') || strlen($input[$field] ?? '') > 2048) {
+                throw new AppError('VALIDATION', 'COS 配置格式无效', 422);
+            }
+            $c[$field] = trim($input[$field] ?? '');
+        }
+        foreach (['secretId', 'secretKey'] as $field) {
+            if ($c[$field] === '') {
+                $c[$field] = $old[$field];
+            }
+        }
+        if (
+            !preg_match('/^[a-z0-9-]+-[0-9]+$/D', $c['bucket']) ||
+            !preg_match('/^[a-z][a-z0-9-]{1,63}$/D', $c['region']) ||
+            !preg_match('/^[A-Za-z0-9]{10,256}$/D', $c['secretId']) ||
+            !preg_match('/^[A-Za-z0-9]{10,256}$/D', $c['secretKey'])
+        ) {
+            throw new AppError(
+                'VALIDATION',
+                '请填写有效的 COS 存储桶、地域、SecretId 和 SecretKey',
+                422,
+            );
+        }
+        $c['publicUrl'] = rtrim(self::imageUrl($c['publicUrl']), '/');
+        if (
+            $c['publicUrl'] !== '' &&
+            (parse_url($c['publicUrl'], PHP_URL_QUERY) !== null ||
+                parse_url($c['publicUrl'], PHP_URL_FRAGMENT) !== null)
+        ) {
+            throw new AppError('VALIDATION', 'COS 公开域名不能包含查询参数或片段', 422);
+        }
+        $encrypted = SettingsSecret::seal($c);
+        Db::tx(function () use ($encrypted, $user): void {
+            Db::run('DELETE FROM system_settings WHERE id=?', ['cos']);
+            Db::insert('system_settings', ['id' => 'cos', 'config' => $encrypted]);
+            Admin::audit($user, 'media.settings', 'cos', ['updated' => true]);
+        });
+        return self::settings();
     }
 
     public static function imageUrl(mixed $value): string
@@ -90,7 +153,11 @@ final class Media
         }
         $settings = self::settings();
         if (!$settings['configured']) {
-            throw new AppError('COS_NOT_CONFIGURED', '请先在后端配置 COS 环境变量', 503);
+            throw new AppError(
+                'COS_NOT_CONFIGURED',
+                '请先由平台管理员在“COS 图片存储”中保存配置',
+                503,
+            );
         }
         $bucket = $settings['bucket'];
         $region = $settings['region'];
@@ -105,6 +172,7 @@ final class Media
             'taxilink/' . $purpose . '/' . date('Y/m') . '/' . Db::id() . '.' . $extensions[$mime];
         $base = rtrim($settings['publicUrl'] ?: 'https://' . $host, '/');
         self::imageUrl($base);
+        $credentials = self::config();
         $curl = curl_init('https://' . $host . '/' . $key);
         curl_setopt_array($curl, [
             CURLOPT_CUSTOMREQUEST => 'PUT',
@@ -119,8 +187,8 @@ final class Media
                 self::authorization(
                     $host,
                     '/' . $key,
-                    Env::get('COS_SECRET_ID'),
-                    Env::get('COS_SECRET_KEY'),
+                    $credentials['secretId'],
+                    $credentials['secretKey'],
                     time(),
                 ),
             ],

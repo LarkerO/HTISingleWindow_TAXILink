@@ -33,8 +33,12 @@ $mapRequest = static function (
     string $path,
     ?string $token = null,
     array $input = [],
+    ?string $origin = null,
 ) {
     $raw = "$method $path HTTP/1.1\r\nHost: localhost\r\n";
+    if ($origin !== null) {
+        $raw .= "Origin: $origin\r\n";
+    }
     $body = $method === 'POST' ? Db::json($input) : '';
     if ($token !== null) {
         $csrf = Db::one('SELECT csrf FROM sessions WHERE id=?', [hash('sha256', $token)])['csrf'];
@@ -681,4 +685,178 @@ check(
 );
 $cashierRead = Db::data($mapRequest('GET', '/api/admin/cashier', $mapAdmin)->rawBody());
 check(!isset($cashierRead['privateKey'], $cashierRead['keyId']), '管理 API 读取配置不泄漏密钥');
+// Browser entry points and encrypted COS settings must upgrade without replacing identities.
+$clientPath = '/api/admin/passenger-clients';
+check(
+    $mapRequest('POST', $clientPath, $mapUser, ['origins' => []])->getStatusCode() === 403,
+    '普通用户不能修改乘客端白名单',
+);
+foreach (
+    [
+        'https://evil.test/path',
+        'https://evil.test/',
+        'https://u:p@evil.test',
+        'http://evil.test',
+        'https://*.test',
+        'null',
+    ]
+    as $invalid
+) {
+    check(
+        $mapRequest('POST', $clientPath, $mapAdmin, ['origins' => [$invalid]])->getStatusCode() ===
+            422,
+        '乘客端拒绝非法源地址 ' . $invalid,
+    );
+}
+$clients = ['https://v2.taxi.test', 'https://v3.taxi.test'];
+check(
+    $mapRequest('POST', $clientPath, $mapAdmin, ['origins' => $clients])->getStatusCode() === 200,
+    '管理员可登记多个乘客端',
+);
+foreach ($clients as $origin) {
+    check(\app\domain\Clients::allowed($origin), 'HTTP 与 WebSocket 共用登记来源 ' . $origin);
+    check(
+        $mapRequest(
+            'POST',
+            '/api/quotes',
+            $mapUser,
+            ['pickupId' => 'riverside', 'dropoffId' => 'museum', 'passengers' => 1],
+            $origin,
+        )->getStatusCode() === 200,
+        '登记乘客端可以请求报价',
+    );
+    check(
+        Auth::oauthRedirect('passenger', $origin) === $origin . '/api/auth/callback',
+        '乘客端使用各自 OAuth 回调',
+    );
+}
+check(
+    \app\domain\Clients::allowed(Env::get('APP_ORIGIN', 'http://localhost:5173')),
+    '新增乘客端保留原入口',
+);
+check(
+    $mapRequest('POST', '/api/quotes', $mapUser, [], 'https://evil.test')->getStatusCode() === 403,
+    '未知乘客端即使拥有 CSRF 也被拒绝',
+);
+Db::migrate();
+check(\app\domain\Clients::allowed($clients[0]), '重复迁移保留乘客端接入设置');
+class PassengerTestConnection extends \Workerman\Connection\TcpConnection
+{
+    public bool $closed = false;
+    public function __construct(int $id)
+    {
+        $this->id = $id;
+    }
+    public function close(mixed $data = null, bool $raw = false): void
+    {
+        $this->closed = true;
+    }
+    public function __destruct() {}
+}
+$stream = new \app\process\PassengerStream();
+foreach ([$clients[0], $clients[1], 'https://evil.test'] as $index => $origin) {
+    $connection = new PassengerTestConnection(9000 + $index);
+    $stream->onWebSocketConnect(
+        $connection,
+        new \Workerman\Protocols\Http\Request(
+            "GET /ws HTTP/1.1\r\nHost: localhost\r\nOrigin: $origin\r\nCookie: tl_session=$mapUser\r\n\r\n",
+        ),
+    );
+    check(
+        $connection->closed === ($origin === 'https://evil.test'),
+        'WebSocket 握手按多端白名单校验 ' . $origin,
+    );
+}
+$anonymousStream = new PassengerTestConnection(9010);
+$stream->onWebSocketConnect(
+    $anonymousStream,
+    new \Workerman\Protocols\Http\Request(
+        "GET /ws HTTP/1.1\r\nHost: localhost\r\nOrigin: {$clients[0]}\r\n\r\n",
+    ),
+);
+check($anonymousStream->closed, '登记来源的 WebSocket 仍需要有效会话');
+$beforeUpgrade = [];
+foreach (['users', 'orders', 'payments', 'cashier_trades'] as $table) {
+    $beforeUpgrade[$table] = Db::all("SELECT * FROM $table ORDER BY id");
+}
+Db::migrate();
+foreach ($beforeUpgrade as $table => $records) {
+    check(
+        Db::all("SELECT * FROM $table ORDER BY id") === $records,
+        '重复升级完整保留业务数据 ' . $table,
+    );
+}
+
+$mediaPath = '/api/admin/media/settings';
+$mediaInput = [
+    'bucket' => 'images-1234567890',
+    'region' => 'ap-guangzhou',
+    'publicUrl' => 'https://cdn.test/taxi',
+    'secretId' => 'AKIDTEST123456789',
+    'secretKey' => 'SecretKeyTest123456789',
+];
+check(
+    $mapRequest('POST', $mediaPath, $mapUser, $mediaInput)->getStatusCode() === 403,
+    '普通用户不能写入 COS 凭据',
+);
+$keyFile = sys_get_temp_dir() . '/taxilink-settings-' . bin2hex(random_bytes(8)) . '.key';
+putenv('SETTINGS_KEY_FILE=' . $keyFile);
+try {
+    $saved = $mapRequest('POST', $mediaPath, $mapAdmin, $mediaInput);
+    check(
+        $saved->getStatusCode() === 200 && Db::data($saved->rawBody())['configured'],
+        '管理员保存 COS 后即时生效',
+    );
+    $stored = Db::one('SELECT config FROM system_settings WHERE id=?', ['cos'])['config'];
+    check(
+        !str_contains($stored, $mediaInput['secretKey']) &&
+            !str_contains($stored, $mediaInput['secretId']),
+        '数据库加密保存 COS 凭据',
+    );
+    check(
+        !str_contains($saved->rawBody(), $mediaInput['secretKey']) &&
+            !str_contains($saved->rawBody(), $mediaInput['secretId']),
+        'COS 写入响应不回显凭据',
+    );
+    $updated = $mapRequest('POST', $mediaPath, $mapAdmin, [
+        ...$mediaInput,
+        'secretId' => '',
+        'secretKey' => '',
+        'region' => 'ap-shanghai',
+    ]);
+    $opened = \app\domain\SettingsSecret::open(
+        Db::one('SELECT config FROM system_settings WHERE id=?', ['cos'])['config'],
+    );
+    check(
+        $updated->getStatusCode() === 200 &&
+            $opened['secretKey'] === $mediaInput['secretKey'] &&
+            $opened['region'] === 'ap-shanghai',
+        'COS 空白密钥保留旧值且其他设置立即更新',
+    );
+    check(
+        !str_contains(
+            Db::json(Db::all("SELECT data FROM audit_logs WHERE action='media.settings'")),
+            $mediaInput['secretKey'],
+        ),
+        '审计日志不包含 COS 密钥',
+    );
+    check(
+        $mapRequest('POST', $mediaPath, $mapAdmin, [
+            ...$mediaInput,
+            'publicUrl' => 'http://cdn.test',
+        ])->getStatusCode() === 422,
+        'COS 公开域名必须使用 HTTPS',
+    );
+    Db::migrate();
+    check(
+        \app\domain\Media::settings()['region'] === 'ap-shanghai',
+        '重复迁移保留 COS 设置及加密内容',
+    );
+} finally {
+    Db::run('DELETE FROM system_settings WHERE id=?', ['cos']);
+    if (is_file($keyFile)) {
+        unlink($keyFile);
+    }
+    putenv('SETTINGS_KEY_FILE');
+}
 echo "\n$checks 项领域验证通过\n";

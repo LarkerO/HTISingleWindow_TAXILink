@@ -1,0 +1,76 @@
+<script setup lang="ts">
+import { themePrimary } from '../lib/theme'
+import { ref } from 'vue'
+import { notify } from '../lib/api'
+import { navigationHeight } from '../lib/navigation'
+// #ifdef APP
+import { readPortalSession } from '@/uni_modules/x-taxilink-session-s'
+import { adoptPortalSession } from '../lib/api'
+import { finishPortal, discardPortal } from '../lib/portal'
+import { appOrigin } from '../lib/config'
+// #endif
+
+const source = ref<string>('')
+const failed = ref<boolean>(false)
+const windowInfo = uni.getWindowInfo()
+const viewHeight = Math.max(100, windowInfo.windowHeight - navigationHeight())
+
+// #ifdef APP
+let callbackUrl: string = ''
+let inProgress: boolean = false
+let active: boolean = true
+let completed: boolean = false
+
+function start(): void {
+  if (!appOrigin.startsWith('https://')) {
+    failed.value = true
+    notify('Portal 登录需要配置 HTTPS 服务地址')
+    return
+  }
+  failed.value = false
+  const origin = appOrigin.replace(/\/+$/, '')
+  const returnTo = '/?nativePortal=' + Date.now() + '-' + Math.random().toString(36).slice(2)
+  callbackUrl = origin + returnTo
+  source.value = origin + '/api/auth/start?clientOrigin=' + encodeURIComponent(origin) + '&returnTo=' + encodeURIComponent(returnTo)
+}
+
+async function accept(cookie: string): Promise<void> {
+  if (!active) return
+  try {
+    await adoptPortalSession(cookie)
+    if (active) {
+      completed = true
+      uni.navigateBack({ success: () => { finishPortal() } })
+    }
+  } catch (error) {
+    failed.value = true
+    notify(error)
+  } finally { inProgress = false }
+}
+
+function loaded(event: UniWebViewLoadEvent): void {
+  if (inProgress || event.detail.src.split('#')[0] != callbackUrl) return
+  inProgress = true
+  readPortalSession(appOrigin.replace(/\/+$/, ''), (cookie: string): void => { accept(cookie) })
+}
+
+onLoad(start)
+onUnload(() => {
+  active = false
+  if (!completed) discardPortal()
+})
+// #endif
+</script>
+
+<template>
+  <x-navbar title="HydCraft Portal 登录" back-error-path="/pages/home" />
+  <!-- #ifdef APP -->
+  <web-view v-if="!failed && source" :src="source" :fullscreen="false"
+    :style="{ width: '100%', height: viewHeight + 'px' }"
+    @load="loaded" @error="failed = true" />
+  <view v-else-if="failed" class="page-body">
+    <x-empty :loading="false" :error="true" error-label="无法完成 Portal 登录" :show-btn="false" img-height="112" />
+    <x-button :block="true" :color="themePrimary" @click="start">重新打开 Portal</x-button>
+  </view>
+  <!-- #endif -->
+</template>

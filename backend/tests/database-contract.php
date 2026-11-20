@@ -64,6 +64,7 @@ try {
 $pdo->exec('ALTER TABLE companies DROP COLUMN image_url');
 $pdo->exec('ALTER TABLE vehicles DROP COLUMN image_url');
 $pdo->exec('ALTER TABLE oauth_states DROP COLUMN return_to');
+$pdo->exec('ALTER TABLE oauth_states DROP COLUMN client_origin');
 $pdo->exec('ALTER TABLE orders DROP COLUMN queue_ticket');
 $pdo->exec('ALTER TABLE orders DROP COLUMN revision');
 $pdo->exec('ALTER TABLE orders DROP COLUMN vehicle_pending');
@@ -76,6 +77,7 @@ check(
 Db::all('SELECT image_url FROM companies');
 Db::all('SELECT image_url FROM vehicles');
 Db::all('SELECT return_to FROM oauth_states');
+Db::all('SELECT client_origin FROM oauth_states');
 Db::all('SELECT queue_ticket,revision,vehicle_pending FROM orders');
 $text = str_repeat('轨迹🚕', 20000);
 Db::insert('quotes', [

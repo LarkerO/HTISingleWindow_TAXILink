@@ -6,7 +6,9 @@
 
 升级前备份数据库；后端启动迁移会为企业和车型补充 `image_url` 列，并创建 `announcements` 表。兼容 SQLite 和 MySQL，可重复执行。
 
-在 `backend/.env` 或服务进程的环境变量中填写：
+平台管理员可在管理台“COS 图片存储”填写桶、地域和凭据，保存后即时生效，无需编辑 `.env`。SecretId / SecretKey 不回显，留空保留。凭据加密保存在数据库，需备份 `backend/installation/settings.key`（或 SETTINGS_KEY_FILE 指定位置）。升级步骤见 [本轮升级方案](UPGRADE_PENDING_20261120.md)。
+
+未在管理台保存时，兼容已有 `backend/.env` 或服务进程环境变量：
 
 ```dotenv
 COS_BUCKET=your-bucket-1250000000
@@ -16,7 +18,7 @@ COS_SECRET_KEY=填写服务端访问密钥
 COS_PUBLIC_URL=https://images.example.com
 ```
 
-`COS_PUBLIC_URL` 可留空，使用桶的 HTTPS 域名。填写 CDN 域名时，根路径应映射到同一个桶。重启后端后，在管理端「COS 图片存储」查看配置状态，再上传一张图片验证连接。
+`COS_PUBLIC_URL` 可留空，使用桶的 HTTPS 域名。填写 CDN 域名时，根路径应映射到同一个桶。修改环境变量需要重启，管理台设置无此要求。保存后上传一张图片验证连接；更换桶或域名不会迁移历史图片。
 
 图片通过后端签名 PUT 上传，前端不接触 COS 密钥。配置图片桶或对应 `taxilink/` 前缀公开读取，写权限仅授予服务端；服务端账号只需目标桶 `taxilink/*` 的 `cos:PutObject` 权限。上传使用腾讯云 [COS XML API 签名](https://cloud.tencent.com/document/api/436/7778) 和 [PUT Object](https://cloud.tencent.com/document/product/436/7749)。由于浏览器只向同源后端上传，无需为上传配置桶 CORS。
 
@@ -36,12 +38,12 @@ COS_PUBLIC_URL=https://images.example.com
 
 平台管理员通过「公告中心」新建和编辑 Markdown 公告，支持正文图片上传、预览、发布和下架。v2 手机运营管理台也提供公告编写和预览。
 
-| 设置 | 行为 |
-| --- | --- |
-| 发布 | 关闭时作为草稿或下架，不对乘客开放详情 |
-| 页面通知栏 | 下单页、订单页、个人中心分别选择，可多选或不选 |
-| 在公告列表显示 | 独立控制个人中心进入的公告列表，不影响通知栏入口 |
-| 需要登录查看 | 未登录时不返回标题、列表条目或正文；详情链接会要求登录 |
+| 设置           | 行为                                                   |
+| -------------- | ------------------------------------------------------ |
+| 发布           | 关闭时作为草稿或下架，不对乘客开放详情                 |
+| 页面通知栏     | 下单页、订单页、个人中心分别选择，可多选或不选         |
+| 在公告列表显示 | 独立控制个人中心进入的公告列表，不影响通知栏入口       |
+| 需要登录查看   | 未登录时不返回标题、列表条目或正文；详情链接会要求登录 |
 
 公告按更新时间和 ID 倒序，列表每页 30 条。通知栏每个位置最多展示最新 30 条。列表仅返回摘要字段，不返回正文。
 
@@ -51,16 +53,16 @@ COS_PUBLIC_URL=https://images.example.com
 
 ## 接口
 
-| 方法与路径 | 权限/用途 |
-| --- | --- |
-| `GET /api/admin/media/settings` | 平台管理员，仅返回配置状态和公开信息 |
-| `POST /api/admin/media` | multipart：`file`、`purpose`（company/vehicle/announcement）、`companyId`（车型必填） |
-| `GET /api/admin/announcements` | 平台管理员，含草稿和正文 |
-| `POST /api/admin/announcements` | 平台管理员，创建 |
-| `PATCH /api/admin/announcements/{id}` | 平台管理员，编辑/发布/下架 |
-| `GET /api/announcements?page=1` | 按登录状态过滤的公告列表 |
-| `GET /api/announcements?placement=booking` | 页面通知栏，另支持 orders/profile |
-| `GET /api/announcements/{id}` | 已发布详情，按公告配置检查登录 |
+| 方法与路径                                 | 权限/用途                                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `GET /api/admin/media/settings`            | 平台管理员，仅返回配置状态和公开信息                                                  |
+| `POST /api/admin/media`                    | multipart：`file`、`purpose`（company/vehicle/announcement）、`companyId`（车型必填） |
+| `GET /api/admin/announcements`             | 平台管理员，含草稿和正文                                                              |
+| `POST /api/admin/announcements`            | 平台管理员，创建                                                                      |
+| `PATCH /api/admin/announcements/{id}`      | 平台管理员，编辑/发布/下架                                                            |
+| `GET /api/announcements?page=1`            | 按登录状态过滤的公告列表                                                              |
+| `GET /api/announcements?placement=booking` | 页面通知栏，另支持 orders/profile                                                     |
+| `GET /api/announcements/{id}`              | 已发布详情，按公告配置检查登录                                                        |
 
 公告写入字段为 `title`、`markdown`、`placements`（字符串数组）、`published`、`listed`、`login_required`（后三项为 JSON 布尔值）。标题最多 120 字，正文最多 200KB UTF-8。所有写请求沿用登录会话、CSRF 和审计日志。
 

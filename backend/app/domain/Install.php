@@ -92,6 +92,7 @@ final class Install
                 ? in_array('sqlite', \PDO::getAvailableDrivers(), true)
                 : (bool) array_intersect(['mysql', 'pgsql'], \PDO::getAvailableDrivers()),
             'curl / mbstring' => extension_loaded('curl') && extension_loaded('mbstring'),
+            'PHP OpenSSL' => extension_loaded('openssl'),
             'pcntl / posix (Linux)' =>
                 PHP_OS_FAMILY === 'Windows' ||
                 (extension_loaded('pcntl') && extension_loaded('posix')),

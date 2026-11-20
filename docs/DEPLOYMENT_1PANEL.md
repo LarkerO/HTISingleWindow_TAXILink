@@ -83,6 +83,8 @@ docker compose --env-file deploy/.env -f deploy/compose.yml logs --tail=100 back
 
 ## 5. 更新、备份与回滚
 
+2026-11-20 待发布修复新增多乘客端接入及加密 COS 设置，请同时参阅 [保留数据升级方案](UPGRADE_PENDING_20261120.md)，备份 installation 中的 settings.key。v1 与 v2 应部署到各自域名和静态目录，可同时使用。
+
 更新前暂停业务接单，确认活动订单状态，备份数据库、installation、runtime 和游戏服存档及 taxilink-state。可停止后端后用 `docker compose ... cp` 导出两个目录；MySQL 使用逻辑备份，不能直接复制正在运行的数据库文件。备份应记录代码版本、镜像 ID 与数据库版本。
 
 保留旧镜像供回滚，然后构建新镜像、停止旧进程、迁移、启动：

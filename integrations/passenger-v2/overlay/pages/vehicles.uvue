@@ -1,0 +1,209 @@
+<script setup lang="ts">
+import AnnouncementNotice from '../components/AnnouncementNotice.uvue'
+import { themePrimary, themeTint } from '../lib/theme'
+import { computed, ref, watch } from 'vue'
+import MapSheet from '../components/MapSheet.uvue'
+import CompanyOfferItem from '../components/CompanyOfferItem.uvue'
+import LoginDrawer from '../components/LoginDrawer.uvue'
+import { api, message, notify, refreshUser, user } from '../lib/api'
+import { pickup, dropoff } from '../lib/booking'
+import { home, orderPage, replace } from '../lib/navigation'
+import type { Geometry, Offer, Order, Quote, Unavailable } from '../lib/models'
+
+type Option = { id: string; title: string }
+type Company = { id: string; name: string; min: number; max: number; offer: Offer }
+const counts: Option[] = Array.from({ length: 16 }, (_, index): Option => {
+  const id = String(index + 1)
+  return { id, title: id + ' 人' }
+})
+const passengers = ref<string[]>(['1'])
+const offers = ref<Offer[]>([])
+const unavailable = ref<Unavailable[]>([])
+const selected = ref<string[]>([])
+const model = ref<string>('all')
+const loadError = ref<string>('')
+const quoteWarning = ref<string>('')
+const loading = ref<boolean>(true)
+const submitting = ref<boolean>(false)
+const login = ref<boolean>(false)
+const fareOpen = ref<boolean>(false)
+const detail = ref<Offer | null>(null)
+let request: number = 0
+let quoteId: string = ''
+let expires: number = 0
+const orderKeys = new Map<string, string>()
+
+const feeLabel: Record<string, string> = {
+  baseMinor: '起步费', distanceMinor: '里程费', timeMinor: '时长费',
+  pickupMinor: '接客调度费', returnMinor: '回库调度费', roundingMinor: '整币取整补差'
+}
+const models = computed((): Option[] => {
+  const result: Option[] = [{ id: 'all', title: '全部' }]
+  for (const offer of offers.value) {
+    if (!result.some((item): boolean => item.id == offer.vehicleName)) {
+      result.push({ id: offer.vehicleName, title: offer.vehicleName })
+    }
+  }
+  return result
+})
+const matching = computed((): Offer[] => offers.value.filter((offer): boolean =>
+  model.value == 'all' || offer.vehicleName == model.value))
+const companies = computed((): Company[] => {
+  const result: Company[] = []
+  for (const offer of matching.value) {
+    const company = result.find((item): boolean => item.id == offer.companyId)
+    const amount = offer.fare.amountMinor
+    if (company == null) result.push({ id: offer.companyId, name: offer.companyName, min: amount, max: amount, offer })
+    else {
+      company.min = Math.min(company.min, amount)
+      company.max = Math.max(company.max, amount)
+      if (amount < company.offer.fare.amountMinor) company.offer = offer
+    }
+  }
+  return result
+})
+
+const preview = computed((): Geometry | undefined => {
+  const geometry = (companies.value.find((item): boolean => selected.value.includes(item.id)) ?? companies.value[0])?.offer.route.geometry
+  return geometry == null ? undefined : { ...geometry, progressMeters: 0 }
+})
+
+function selectAll(): void { selected.value = companies.value.map((company): string => company.id) }
+
+async function quote(): Promise<void> {
+  if (submitting.value) return
+  const from = pickup.value
+  const to = dropoff.value
+  if (from == null || to == null || from.id == to.id) { home(); return }
+  const current = ++request
+  loading.value = true
+  offers.value = []
+  unavailable.value = []
+  selected.value = []
+  loadError.value = ''
+  quoteWarning.value = ''
+  quoteId = ''
+  try {
+    if (user.value == null) await refreshUser()
+    if (current != request) return
+    if (user.value == null) { login.value = true; return }
+    const data = await api<Quote>('/quotes', {
+      pickupId: from.id, dropoffId: to.id, passengers: Number(passengers.value[0] ?? '1')
+    })
+    if (current != request) return
+    quoteId = data.id
+    expires = data.expires
+    orderKeys.clear()
+    offers.value = data.offers
+    unavailable.value = data.unavailable
+    quoteWarning.value = data.warning ?? ''
+    model.value = 'all'
+    selectAll()
+  } catch (error) {
+    if (current == request) {
+      loadError.value = message(error)
+      if (user.value == null) login.value = true
+    }
+  } finally {
+    if (current == request) loading.value = false
+  }
+}
+
+function toggle(id: string): void {
+  if (submitting.value) return
+  selected.value = selected.value.includes(id) ? selected.value.filter((item): boolean => item != id) : [...selected.value, id]
+}
+
+function showFare(offer: Offer): void {
+  detail.value = offer
+  fareOpen.value = true
+}
+
+async function book(): Promise<void> {
+  if (submitting.value || loading.value || !quoteId || selected.value.length == 0) return
+  if (Date.now() / 1000 >= expires) { notify('报价已过期，请刷新报价'); return }
+  submitting.value = true
+  try {
+    const companyIds = [...selected.value].sort()
+    const offerIds = matching.value.filter((offer): boolean => companyIds.includes(offer.companyId))
+      .map((offer): string => offer.id).sort()
+    const fingerprint = JSON.stringify([companyIds, offerIds])
+    let key = orderKeys.get(fingerprint)
+    if (!key) {
+      key = 'passenger-' + quoteId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2)
+      orderKeys.set(fingerprint, key)
+    }
+    const result = await api<Order>('/orders', { quoteId, companyIds, offerIds }, key)
+    replace(orderPage(result.state == 'AWAITING_PAYMENT' ? 'checkout' : 'trip', result.id))
+  } catch (error) {
+    notify(error)
+    if (user.value == null) login.value = true
+  } finally { submitting.value = false }
+}
+watch(model, selectAll)
+watch((): string => passengers.value[0] ?? '1', quote)
+onLoad(() => { quote() })
+</script>
+
+<template>
+  <MapSheet title="选择车辆" back="/pages/home" :peek="450" :geometry="preview" :contained="true" :rider-distance="true">
+    <template #default="{ panelHeight }">
+      <view class="quote-panel" :style="{ height: Math.max(130, panelHeight - 44) + 'px' }">
+        <AnnouncementNotice placement="booking" />
+        <view class="quote-heading">
+          <view class="quote-route">
+            <x-text :label="(pickup?.name ?? '') + ' → ' + (dropoff?.name ?? '')" font-size="14" class="text-weight-b" />
+            <x-text label="游戏币报价 · 可多选企业" font-size="11" color="#526a63" />
+          </view>
+        </view>
+        <view v-if="loading" class="quote-state">
+          <x-loading label="正在查询车辆与路线" />
+          <x-skeleton height="50" class="mt-8" />
+        </view>
+        <x-slider-menu v-else v-model="model" :list="models" slider-width="56px" item-height="48px"
+          font-size="12" :height="Math.max(55, panelHeight - 231) + 'px'" width="100%" class="quote-menu" :show-toggle-menu="false">
+          <scroll-view direction="vertical" class="quote-list">
+            <x-empty v-if="loadError || companies.length == 0" :loading="false" :empty="!loadError" :error="!!loadError"
+              :error-label="loadError" :show-btn="false" :title="user == null ? '请登录后查询' : '暂无匹配企业'" img-height="60" img-width="70" />
+            <CompanyOfferItem v-for="item in companies" :key="item.id" :offer="item.offer" :name="item.name"
+              :min="item.min" :max="item.max" :selected="selected.includes(item.id)" :busy="submitting"
+              :estimated="matching.some((offer) => offer.companyId == item.id && offer.rules.mode != 'fixed')"
+              @toggle="toggle(item.id)" @details="showFare(item.offer)" />
+            <x-text v-if="quoteWarning" :label="quoteWarning" font-size="11" color="#526a63" class="mb-6" />
+            <x-text v-for="item in unavailable" :key="item.name" :label="item.name + ' · ' + item.reason"
+              font-size="11" color="#526a63" class="mb-6" />
+          </scroll-view>
+        </x-slider-menu>
+        <view class="quote-footer">
+          <x-button size="small" icon="refresh-line" :color="themeTint" :font-color="themePrimary" :disabled="loading || submitting" @click="quote">刷新报价</x-button>
+          <view class="quote-confirm">
+            <x-button :block="true" icon="taxi-line" height="42" :color="themePrimary" :loading="submitting"
+              :disabled="loading || selected.length == 0" @click="book">确认打车 · 已选 {{ selected.length }} 家</x-button>
+          </view>
+        </view>
+        <x-picker v-model="passengers" :list="counts" title="选择同行人数" confirm-text="确认人数" :disabled="submitting">
+          <x-cell title="同行人数" icon="group-line" icon-size="16" icon-color="#526a63"
+            :padding="['1','0']" :label="(passengers[0] ?? '1') + ' 人'" title-size="13" />
+        </x-picker>
+      </view>
+    </template>
+  </MapSheet>
+  <LoginDrawer v-model:show="login" resume="vehicles" @success="quote" />
+  <x-modal v-model:show="fareOpen" title="费用明细" height="auto" :show-cancel="false" confirm-text="知道了">
+    <view v-if="detail">
+      <x-cell v-for="(amount, key) in detail.fare.components" :key="key" :title="feeLabel[key] ?? key" :link="false"
+        :label="(amount / 100).toFixed(2) + ' 游戏币'" label-color="#203b34" />
+    </view>
+  </x-modal>
+</template>
+
+<style scoped>
+.quote-panel { padding: 0 10px 8px; overflow: hidden; }
+.quote-heading { min-height: 46px; flex-direction: row; align-items: center; padding: 4px 4px 8px; }
+.quote-route { flex: 1; padding-right: 8px; }
+.quote-menu { flex: 1; min-height: 0; overflow: hidden; }
+.quote-list { height: 100%; padding: 0 0 2px 3px; }
+.quote-state { flex: 1; padding: 10px; }
+.quote-footer { flex-direction: row; align-items: center; padding-top: 6px; }
+.quote-confirm { flex: 1; margin-left: 8px; }
+</style>

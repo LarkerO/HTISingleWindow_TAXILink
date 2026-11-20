@@ -13,6 +13,7 @@ const router = useRouter(),
   quoteId = ref(''),
   expires = ref(0),
   quoteError = ref(''),
+  quoteWarning = ref(''),
   unavailable = ref<{ name: string; reason: string }[]>([]);
 const model = ref('');
 const models = computed(() => [...new Set(offers.value.map((o) => o.vehicleName))]);
@@ -50,6 +51,7 @@ async function quote() {
   unavailable.value = [];
   selected.value = [];
   quoteError.value = '';
+  quoteWarning.value = '';
   quoteId.value = '';
   orderKey = crypto.randomUUID();
   try {
@@ -58,6 +60,7 @@ async function quote() {
       expires: number;
       offers: Offer[];
       unavailable: typeof unavailable.value;
+      warning?: string;
     }>('/quotes', {
       pickupId: pickup.value.id,
       dropoffId: dropoff.value.id,
@@ -69,6 +72,7 @@ async function quote() {
     offers.value = d.offers;
     model.value = '';
     unavailable.value = d.unavailable;
+    quoteWarning.value = d.warning || '';
     selected.value = [...new Set(d.offers.map((o) => o.companyId))];
   } catch (e) {
     if (current === request) quoteError.value = e instanceof Error ? e.message : '请稍后重试';
@@ -214,6 +218,7 @@ onMounted(quote);
       </details>
     </button>
     <p v-for="c in unavailable" :key="c.name" class="helper">{{ c.name }}：{{ c.reason }}</p>
+    <p v-if="quoteWarning" role="status" class="helper">{{ quoteWarning }}</p>
     <div v-if="!companies.length" class="empty">
       <h2>暂时没有可用路线</h2>
       <p>可以调整人数或上下车点后重试</p>

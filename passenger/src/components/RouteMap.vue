@@ -7,6 +7,7 @@ import {
   type BlueMapSettings,
 } from '../../../shared/bluemap';
 import type { Geometry } from '../api';
+import { blueMapHealthScript } from '../../../shared/bluemap-health';
 const props = defineProps<{
   geometry?: Geometry;
   position?: { x: number; z: number };
@@ -18,17 +19,54 @@ const scale = ref(1),
   pointers = new Map<number, { x: number; y: number }>();
 const view3d = ref(false);
 const view3dUrl = ref('');
+const frame3d = ref<HTMLIFrameElement>();
+const mapNotice = ref('');
+let healthTimer: ReturnType<typeof setInterval> | undefined;
+let healthDeadline: ReturnType<typeof setTimeout> | undefined;
+function stopHealth() {
+  clearInterval(healthTimer);
+  clearTimeout(healthDeadline);
+}
+function fallback3d() {
+  stopHealth();
+  view3d.value = false;
+  mapNotice.value = '3D 地图暂不可用，已恢复 2D；请检查浏览器 WebGL2 支持或稍后重试。';
+}
+function checkHealth() {
+  try {
+    (frame3d.value?.contentWindow as (Window & { eval: (code: string) => void }) | null)?.eval(
+      blueMapHealthScript(),
+    );
+  } catch {
+    /* Navigation and module initialization may still be pending. */
+  }
+}
+function receiveHealth(event: MessageEvent) {
+  if (
+    event.origin !== location.origin ||
+    event.source !== frame3d.value?.contentWindow ||
+    event.data?.type !== 'taxilink-bluemap-health'
+  )
+    return;
+  if (event.data.status === 'failed') fallback3d();
+  if (event.data.status === 'ready') clearTimeout(healthDeadline);
+}
 const settings = ref<BlueMapSettings>();
 const failed = ref(false);
 const request = new AbortController();
 onMounted(async () => {
+  window.addEventListener('message', receiveHealth);
   try {
     settings.value = await loadBlueMap(request.signal);
   } catch {
     if (!request.signal.aborted) failed.value = true;
   }
 });
-onUnmounted(() => request.abort());
+onUnmounted(() => {
+  request.abort();
+  stopHealth();
+  window.removeEventListener('message', receiveHealth);
+});
 const source = computed(() => props.geometry?.points ?? []);
 const bounds = computed(() => {
   const [x, z] = settings.value?.startPos ?? [0, 0];
@@ -122,6 +160,8 @@ function move(e: PointerEvent) {
   }
 }
 function toggleView() {
+  stopHealth();
+  mapNotice.value = '';
   if (!view3d.value && settings.value) {
     const b = bounds.value;
     view3dUrl.value = blueMap3dUrl(
@@ -130,6 +170,8 @@ function toggleView() {
       b.z + b.h / 2,
       Math.max(b.w, b.h),
     );
+    healthTimer = setInterval(checkHealth, 500);
+    healthDeadline = setTimeout(fallback3d, 22000);
   }
   view3d.value = !view3d.value;
 }
@@ -146,6 +188,9 @@ function follow() {
   <div class="route-map" :class="{ home }">
     <iframe
       v-if="view3d && settings"
+      ref="frame3d"
+      @load="checkHealth"
+      @error="fallback3d"
       title="BlueMap 3D 地图"
       :src="view3dUrl"
       style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0"
@@ -232,6 +277,7 @@ function follow() {
       {{ failed ? 'BlueMap 底图暂不可用' : settings ? 'BlueMap' : '正在加载底图'
       }}<span>双指缩放 · 拖动查看</span>
     </div>
+    <div v-if="mapNotice" class="map-recovery-note" role="status">{{ mapNotice }}</div>
     <div class="map-controls">
       <button
         v-if="settings?.allow3d"

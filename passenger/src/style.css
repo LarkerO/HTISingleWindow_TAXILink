@@ -319,6 +319,19 @@ main {
   border-radius: 9px;
   overflow: hidden;
 }
+.map-recovery-note {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 55px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fffffff0;
+  color: #526a63;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+}
 .map-controls button {
   border: 0;
   background: #fffffff2;

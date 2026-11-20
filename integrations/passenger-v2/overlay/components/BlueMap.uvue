@@ -1,0 +1,349 @@
+<script setup lang="ts">
+import { themePrimary } from '../lib/theme'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { blue3d, blueTiles, loadBlueMap } from '../lib/bluemap'
+import { notify } from '../lib/api'
+import { serviceUrl } from '../lib/config'
+import { blueMapHealthScript } from '../lib/bluemap-health'
+import { routeMarkerScript, routeStops } from '../lib/bluemap-route'
+import type { BlueMap, Camera, Tile } from '../lib/bluemap'
+import type { Geometry, Position } from '../lib/models'
+
+type Props = { height: number; fitHeight: number; width: number; controlTop: number; geometry?: Geometry; position?: Position; riderDistance: boolean }
+type Screen = { x: number; y: number }
+type Gesture = { x: number; y: number; distance: number }
+type Line = { left: number; top: number; width: number; angle: number; done: boolean }
+type Arrow = { left: number; top: number; angle: number }
+type MapMode = { id: string; title: string }
+const props = defineProps<Props>()
+const modes: MapMode[] = [{ id: '2d', title: '2D' }, { id: '3d', title: '3D' }]
+const map = ref<BlueMap | null>(null)
+const mode = ref<string>('2d')
+const url3d = ref<string>('')
+const loading = ref<boolean>(true)
+const failed = ref<boolean>(false)
+const offset = ref<Screen>({ x: 0, y: 0 })
+const zoom = ref<number>(1)
+const cornerOverlap = 26
+const viewId = 'taxilink-bluemap-' + Math.random().toString(36).slice(2)
+let markerTimer: number = 0
+let healthTimer: number = 0
+let touch: Gesture | null = null
+// #ifdef WEB
+let mouse: Screen | null = null
+// #endif
+
+const points = computed((): number[][] => props.geometry?.points ?? [])
+const allow3d = computed((): boolean => map.value?.allow3d ?? false)
+const camera = computed((): Camera => {
+  let x = map.value?.startPos[0] ?? 0
+  let z = map.value?.startPos[1] ?? 0
+  let fit = Math.min(props.width, props.fitHeight) / 630
+  if (points.value.length > 0) {
+    let minX = points.value[0][1]
+    let maxX = minX
+    let minZ = points.value[0][3]
+    let maxZ = minZ
+    for (const point of points.value) {
+      minX = Math.min(minX, point[1]); maxX = Math.max(maxX, point[1])
+      minZ = Math.min(minZ, point[3]); maxZ = Math.max(maxZ, point[3])
+    }
+    x = (minX + maxX) / 2
+    z = (minZ + maxZ) / 2
+    fit = Math.min((props.width - 70) / Math.max(100, maxX - minX),
+      (props.fitHeight - 80) / Math.max(100, maxZ - minZ))
+  }
+  const scale = Math.max(0.025, fit * zoom.value)
+  return { x: x - offset.value.x / scale, z: z - offset.value.y / scale, scale, width: props.width, height: props.height }
+})
+
+function project(x: number, z: number): Screen {
+  const c = camera.value
+  return { x: c.width / 2 + (x - c.x) * c.scale, y: c.height / 2 + (z - c.z) * c.scale }
+}
+
+const tiles = computed((): Tile[] => {
+  const c = camera.value
+  return map.value == null || mode.value == '3d' ? [] :
+    blueTiles(map.value, { ...c, height: c.height + cornerOverlap, z: c.z + cornerOverlap / (2 * c.scale) })
+})
+const lines = computed((): Line[] => {
+  const result: Line[] = []
+  const progress = props.geometry?.progressMeters ?? 0
+  function append(from: Screen, to: Screen, done: boolean): void {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const length = Math.sqrt(dx * dx + dy * dy)
+    if (length < 0.1) return
+    result.push({ left: from.x, top: from.y - 6, width: length, angle: Math.atan2(dy, dx), done })
+  }
+  for (let index = 1; index < points.value.length; index++) {
+    const a = points.value[index - 1]
+    const b = points.value[index]
+    const from = project(a[1], a[3])
+    const to = project(b[1], b[3])
+    if (progress > a[0] && progress < b[0]) {
+      const t = (progress - a[0]) / (b[0] - a[0])
+      const cut = { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t }
+      append(from, cut, true)
+      append(cut, to, false)
+    } else append(from, to, progress > 0 && progress >= b[0])
+  }
+  return result
+})
+const arrows = computed((): Arrow[] => {
+  const result: Arrow[] = []
+  let gap = 24
+  for (const line of lines.value) {
+    if (line.done) continue
+    const length = line.width
+    while (gap < length) {
+      const x = line.left + Math.cos(line.angle) * gap
+      const y = line.top + 6 + Math.sin(line.angle) * gap
+      if (x >= 0 && x <= props.width && y >= 0 && y <= props.height) result.push({ left: x, top: y, angle: line.angle })
+      gap += 46
+    }
+    gap -= length
+  }
+  return result
+})
+const stops = computed(() => routeStops(props.geometry, props.riderDistance).map(stop => {
+  const screen = project(stop.position.x, stop.position.z)
+  const rightGap = screen.y > props.height - 155 ? 52 : 4
+  const labelLeft = Math.max(4, Math.min(props.width - 120 - rightGap, screen.x - 60))
+  return { ...screen, label: stop.label, labelLeft }
+}))
+const vehicle = computed((): Screen | null => props.position == null ? null : project(props.position.x, props.position.z))
+
+async function load(): Promise<void> {
+  failed.value = false
+  loading.value = true
+  try {
+    map.value = await loadBlueMap()
+  } catch {
+    failed.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+function readGesture(event: UniTouchEvent): Gesture | null {
+  const first = event.touches[0]
+  if (first == null) return null
+  const second = event.touches[1]
+  if (second == null) return { x: first.clientX, y: first.clientY, distance: 0 }
+  const x = second.clientX - first.clientX
+  const y = second.clientY - first.clientY
+  return { x: first.clientX + x / 2, y: first.clientY + y / 2, distance: Math.sqrt(x * x + y * y) }
+}
+function startPan(event: UniTouchEvent): void { touch = readGesture(event) }
+function changeZoom(factor: number, anchorX: number = 0, anchorY: number = 0): void {
+  if (mode.value == '3d') {
+    eval3d('(() => { const zoom = window.bluemap?.mapViewer?.controlsManager?.controls?.mouseZoom; ' +
+      'if (zoom) zoom.deltaZoom += ' + (factor > 1 ? '-3' : '3') + '; })()')
+    return
+  }
+  const next = Math.min(8, Math.max(0.5, zoom.value * factor))
+  const ratio = next / zoom.value
+  offset.value = { x: anchorX + (offset.value.x - anchorX) * ratio, y: anchorY + (offset.value.y - anchorY) * ratio }
+  zoom.value = next
+}
+// #ifdef WEB
+function mouseStart(event: MouseEvent): void {
+  if (event.button == 0) mouse = { x: event.clientX, y: event.clientY }
+}
+function mouseMove(event: MouseEvent): void {
+  if (mouse == null) return
+  if (!(event.buttons & 1)) { mouse = null; return }
+  offset.value = { x: offset.value.x + event.clientX - mouse.x, y: offset.value.y + event.clientY - mouse.y }
+  mouse = { x: event.clientX, y: event.clientY }
+}
+function mouseEnd(): void { mouse = null }
+function wheelZoom(event: WheelEvent): void {
+  const bounds = (event.currentTarget as Element).getBoundingClientRect()
+  changeZoom(event.deltaY < 0 ? 1.18 : 1 / 1.18,
+    event.clientX - bounds.left - props.width / 2, event.clientY - bounds.top - props.height / 2)
+}
+// #endif
+function movePan(event: UniTouchEvent): void {
+  const previous = touch
+  const next = readGesture(event)
+  touch = next
+  if (next == null || previous == null || (next.distance == 0) != (previous.distance == 0)) return
+  if (previous.distance > 1 && next.distance > 1) changeZoom(next.distance / previous.distance)
+  offset.value = { x: offset.value.x + next.x - previous.x, y: offset.value.y + next.y - previous.y }
+}
+function endPan(event: UniTouchEvent): void { touch = readGesture(event) }
+function focus(): void {
+  if (mode.value == '3d') {
+    const c = camera.value
+    const target = props.position ?? { x: c.x, y: points.value[0]?.[2] ?? 64, z: c.z }
+    eval3d('window.bluemap?.mapViewer?.controlsManager?.position?.set(...' +
+      JSON.stringify([target.x, target.y, target.z]) + ')')
+    return
+  }
+  offset.value = { x: 0, y: 0 }
+  const location = props.position
+  zoom.value = location == null ? 1 : 2
+  if (location != null) {
+    const target = project(location.x, location.z)
+    offset.value = { x: props.width / 2 - target.x, y: props.height / 2 - target.y }
+  }
+}
+function fallback3d(): void {
+  mode.value = '2d'
+  notify('3D 暂不可用，已恢复 2D；请检查 WebGL2 支持或稍后重试')
+}
+function loaded3d(event: UniWebViewLoadEvent): void {
+  if (event.detail.src.split('?')[0].endsWith('/static/bluemap-fallback.html')) { fallback3d(); return }
+  render3dRoute()
+}
+// #ifdef WEB
+function receiveHealth(event: MessageEvent): void {
+  const host = document.getElementById(viewId)
+  const frame = (host?.tagName == 'IFRAME' ? host : host?.querySelector('iframe')) as HTMLIFrameElement | null
+  if (event.origin != window.location.origin || event.source != frame?.contentWindow || event.data?.type != 'taxilink-bluemap-health') return
+  if (event.data.status == 'failed') fallback3d()
+  if (event.data.status == 'ready' && healthTimer != 0) { clearTimeout(healthTimer); healthTimer = 0 }
+}
+// #endif
+function render3dRoute(): void {
+  if (map.value == null) return
+  // #ifdef WEB
+  eval3d(blueMapHealthScript())
+  // #endif
+  // #ifdef APP
+  eval3d(blueMapHealthScript(serviceUrl('/static/bluemap-fallback.html')))
+  // #endif
+  eval3d(routeMarkerScript(map.value.id, props.geometry, props.position, props.riderDistance))
+}
+function eval3d(command: string): void {
+  if (mode.value != '3d' || !url3d.value) return
+  const expected = url3d.value.split('#')[0]
+  // #ifdef APP
+  uni.createWebviewContext(viewId)?.evalJS(
+    'if (location.href.split("#")[0] === ' + JSON.stringify(expected) + ') {' + command + '}')
+  // #endif
+  // #ifdef WEB
+  try {
+    const host = document.getElementById(viewId)
+    const frame = (host?.tagName == 'IFRAME' ? host : host?.querySelector('iframe')) as HTMLIFrameElement | null
+    const target = frame?.contentWindow as any
+    if (target?.location.href.split('#')[0] == new URL(expected, window.location.origin).href) target.eval(command)
+  } catch { /* The map may be loading or have navigated away. */ }
+  // #endif
+}
+function clearMarkerTimer(): void {
+  if (markerTimer != 0) clearInterval(markerTimer)
+  markerTimer = 0
+  if (healthTimer != 0) clearTimeout(healthTimer)
+  healthTimer = 0
+}
+
+watch(mode, (next): void => {
+  clearMarkerTimer()
+  if (next == '3d' && map.value != null) {
+    url3d.value = blue3d(map.value, camera.value)
+    markerTimer = setInterval(render3dRoute, 1200)
+    // #ifdef WEB
+    healthTimer = setTimeout(fallback3d, 22000)
+    // #endif
+  }
+})
+onUnmounted(() => {
+  clearMarkerTimer()
+  // #ifdef WEB
+  window.removeEventListener('message', receiveHealth)
+  // #endif
+})
+onMounted(() => {
+  // #ifdef WEB
+  window.addEventListener('message', receiveHealth)
+  // #endif
+  load()
+})
+</script>
+
+<template>
+  <view class="map" :style="{ height: (height + cornerOverlap) + 'px' }">
+    <web-view v-if="mode == '3d' && url3d" :id="viewId" :fullscreen="false" class="map-layer" :src="url3d"
+      :style="{ height: (height + cornerOverlap) + 'px' }" @load="loaded3d" @error="fallback3d" />
+    <view v-else class="map-layer map-interactive" @touchstart="startPan" @touchmove.stop.prevent="movePan"
+      @touchend="endPan" @touchcancel="endPan"
+      <!-- #ifdef WEB -->
+      @mousedown.prevent="mouseStart" @mousemove="mouseMove" @mouseup="mouseEnd"
+      @mouseleave="mouseEnd" @wheel.prevent="wheelZoom" @dragstart.prevent
+      <!-- #endif -->
+    >
+      <view v-for="tile in tiles" :key="tile.url" class="tile"
+        :style="{ left: tile.x + 'px', top: tile.y + 'px', width: tile.width + 'px', height: tile.height + 'px' }">
+        <image class="tile-image" :src="tile.url" mode="scaleToFill"
+          :style="{ width: tile.imageWidth + 'px', height: tile.imageHeight + 'px' }" />
+      </view>
+      <view v-for="(line, index) in lines" :key="index" class="route-line"
+        :style="{ left: line.left + 'px', top: line.top + 'px', width: line.width + 'px', transform: 'rotate(' + line.angle + 'rad)' }">
+        <view class="route-stroke" :class="{ 'route-done': line.done }" />
+        <view class="route-joint route-start" :class="{ 'route-done': line.done }" />
+        <view v-if="index == lines.length - 1" class="route-joint route-end" :class="{ 'route-done': line.done }" />
+      </view>
+      <view v-for="(arrow, index) in arrows" :key="'arrow-' + index" class="route-arrow"
+        :style="{ left: (arrow.left - 6) + 'px', top: (arrow.top - 6) + 'px', transform: 'rotate(' + (arrow.angle + Math.PI / 4) + 'rad)' }">
+        <view class="route-chevron"></view>
+      </view>
+      <template v-for="(stop, index) in stops" :key="index">
+        <view class="pin" :class="index == 0 ? 'pin-start' : 'pin-end'" :style="{ left: (stop.x - 6) + 'px', top: (stop.y - 6) + 'px' }" />
+        <view v-if="stop.x >= 0 && stop.x <= width && stop.y > 20 && stop.y < height" class="map-stop"
+          :style="{ left: stop.labelLeft + 'px', top: (stop.y - 29) + 'px' }">
+          <x-text :label="stop.label" font-size="11" color="#142c27" />
+        </view>
+      </template>
+      <view v-if="vehicle" class="pin pin-vehicle" :style="{ left: (vehicle.x - 8) + 'px', top: (vehicle.y - 8) + 'px' }" />
+      <view v-if="loading || failed" class="map-state">
+        <x-loading v-if="loading" label="正在加载 BlueMap" />
+        <x-button v-else size="small" color="#ffffff" :font-color="themePrimary" @click="load">BlueMap 暂不可用 · 重试</x-button>
+      </view>
+    </view>
+    <view v-if="map" class="map-controls" :style="{ top: controlTop + 'px' }">
+      <view v-if="allow3d" class="map-modes">
+        <x-radio-button v-model="mode" :list="modes" height="34" font-size="12" />
+      </view>
+    </view>
+    <view v-if="map" class="zoom-controls">
+      <x-button width="36" height="36" color="#ffffff" :font-color="themePrimary" @click="changeZoom(1.35)">＋</x-button>
+      <x-button width="36" height="36" color="#ffffff" :font-color="themePrimary" @click="changeZoom(0.74)">－</x-button>
+      <x-button width="36" height="36" icon="focus-3-line" color="#ffffff" :font-color="themePrimary" @click="focus" />
+    </view>
+    <view v-if="map" class="attribution">
+      <x-text label="BlueMap" font-size="11" color="#526a63" />
+    </view>
+  </view>
+</template>
+
+<style scoped>
+.map { position: relative; background-color: #dfece7; overflow: hidden; }
+.map-layer { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; overflow: hidden; }
+.tile { position: absolute; overflow: hidden; }
+.tile-image { position: absolute; left: 0; top: 0; }
+.route-line { position: absolute; height: 12px; transform-origin: left center; overflow: visible; }
+.route-stroke { height: 12px; width: 100%; background-color: #08a784; }
+.route-joint { position: absolute; top: 0; width: 12px; height: 12px; border-radius: 6px; background-color: #08a784; }
+.route-start { left: -6px; }
+.route-end { right: -6px; }
+.route-done { background-color: #89958f; }
+.route-arrow { position: absolute; width: 12px; height: 12px; align-items: center; justify-content: center; }
+.route-chevron { width: 5px; height: 5px; border-style: solid; border-width: 0; border-top-width: 2px; border-right-width: 2px; border-top-color: #ffffff; border-right-color: #ffffff; }
+/* #ifdef WEB */
+.map-interactive { cursor: grab; touch-action: none; user-select: none; }
+.map-interactive:active { cursor: grabbing; }
+/* #endif */
+.pin { position: absolute; width: 12px; height: 12px; border-width: 2px; border-color: #ffffff; border-radius: 8px; }
+.pin-start { background-color: #008b6f; }
+.pin-end { background-color: #e38a35; }
+.pin-vehicle { width: 16px; height: 16px; background-color: #1669d8; }
+.map-state { flex: 1; justify-content: center; align-items: center; }
+.map-controls { position: absolute; top: 12px; left: 12px; flex-direction: row; align-items: center; z-index: 2; }
+.map-modes { width: 84px; }
+.zoom-controls { position: absolute; right: 10px; bottom: 38px; gap: 7px; z-index: 2; }
+.attribution { position: absolute; left: 10px; bottom: 38px; background-color: #ffffff; padding: 3px 7px; border-radius: 6px; }
+.map-stop { position: absolute; width: 120px; align-items: center; background-color: #ffffff; border-radius: 7px; padding: 3px 2px; }
+</style>

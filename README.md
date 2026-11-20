@@ -2,21 +2,23 @@
 
 与 `TAXILink_MOD` 独立的业务仓库，面向单个 Minecraft 服务器、单个 MTR 维度。
 
-| 应用     | 技术                                          | 开发地址                |
-| -------- | --------------------------------------------- | ----------------------- |
-| 总后端   | webman 2 / Workerman 5、PDO、MySQL 8 / PostgreSQL 14+、Redis   | `http://localhost:8787` |
-| 运营管理 | React 19、Vite、Ant Design 6、ProComponents 3 | `http://localhost:5174` |
-| 乘客端   | Vue 3、Vite、TDesign Mobile                   | `http://localhost:5173` |
+2026-11-20 内测修复待发布：报价并行与超时、多乘客端并行接入、3D 故障恢复和管理台 COS 配置。保留数据升级、备份和回滚步骤见 [本轮升级方案](docs/UPGRADE_PENDING_20261120.md)。本轮不发布新版。
+
+| 应用     | 技术                                                         | 开发地址                |
+| -------- | ------------------------------------------------------------ | ----------------------- |
+| 总后端   | webman 2 / Workerman 5、PDO、MySQL 8 / PostgreSQL 14+、Redis | `http://localhost:8787` |
+| 运营管理 | React 19、Vite、Ant Design 6、ProComponents 3                | `http://localhost:5174` |
+| 乘客端   | Vue 3、Vite、TDesign Mobile                                  | `http://localhost:5173` |
 
 ProComponents 使用 npm 实际发布且支持 Ant Design 6 的 `3.1.15-9` 版本，锁定在 lockfile。管理端遵循 Ant Design Pro 的布局与组件体系，使用 Vite 构建。
 
 ## 选择运行方式
 
-| 用途 | 数据库与登录 | 入口 |
-| --- | --- | --- |
-| 本地演示 | SQLite、演示账号、模拟模组 | [快速体验](#快速体验) |
-| 本机联调 | SQLite、HydCraft Portal、真实 SM2 模组网关 | [本机测试安装](docs/DEPLOYMENT.md#本机测试安装) |
-| 正式部署 | MySQL / PostgreSQL、Redis、HTTPS、HydCraft Portal | [生产安装](docs/DEPLOYMENT.md#生产安装) |
+| 用途     | 数据库与登录                                      | 入口                                            |
+| -------- | ------------------------------------------------- | ----------------------------------------------- |
+| 本地演示 | SQLite、演示账号、模拟模组                        | [快速体验](#快速体验)                           |
+| 本机联调 | SQLite、HydCraft Portal、真实 SM2 模组网关        | [本机测试安装](docs/DEPLOYMENT.md#本机测试安装) |
+| 正式部署 | MySQL / PostgreSQL、Redis、HTTPS、HydCraft Portal | [生产安装](docs/DEPLOYMENT.md#生产安装)         |
 
 Windows PowerShell 生成安装码：在项目根目录安装 Composer 依赖后，运行 `php .\backend\bin\console.php install-code`。使用与启动后端相同的 Windows 账号。安装码适用于未配置的实例；请先在单独目录准备全新实例，再验证浏览器安装流程。
 

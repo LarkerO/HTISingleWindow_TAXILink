@@ -1,0 +1,113 @@
+<script setup lang="ts">
+import { themePrimary } from '../lib/theme'
+import { computed, ref } from 'vue'
+import LegalDrawer from './LegalDrawer.uvue'
+import { notify } from '../lib/api'
+import { appOrigin, serviceUrl } from '../lib/config'
+// #ifdef APP
+import { startIntent } from '@/uni_modules/x-startintent-s'
+import { supportsPortalSession } from '@/uni_modules/x-taxilink-session-s'
+import { openPortalPage } from '../lib/portal'
+// #endif
+
+type Props = { resume?: string; show?: boolean }
+const props = withDefaults(defineProps<Props>(), { resume: '', show: false })
+const emit = defineEmits<{ success: []; 'update:show': [value: boolean] }>()
+const agreed = ref<boolean>(false)
+const legalDocument = ref<string>('')
+const helpOpen = ref<boolean>(false)
+const show = computed({
+  get: (): boolean => props.show,
+  set: (value: boolean): void => { emit('update:show', value) }
+})
+
+function signedIn(): void {
+  show.value = false
+  emit('success')
+}
+
+function checkAgreement(): boolean {
+  if (agreed.value) return true
+  notify('请先阅读并同意隐私政策和服务协议')
+  return false
+}
+
+function openPortal(): void {
+  if (!checkAgreement()) return
+  // #ifdef WEB
+  const returnTo = '/?resume=' + encodeURIComponent(props.resume)
+  window.location.assign('/api/auth/start?clientOrigin=' + encodeURIComponent(window.location.origin) + '&returnTo=' + encodeURIComponent(returnTo))
+  // #endif
+  // #ifdef APP
+  if (appOrigin.length == 0) {
+    notify('请先配置 TAXILink 服务地址')
+    return
+  }
+  if (supportsPortalSession()) {
+    openPortalPage(signedIn)
+    return
+  }
+  startIntent({
+    url: serviceUrl('/api/auth/start') + '?clientOrigin=' + encodeURIComponent(appOrigin.replace(/\/+$/, '')) + '&returnTo=' + encodeURIComponent('/?resume=' + encodeURIComponent(props.resume)),
+    fail: () => { notify('未能打开浏览器') }
+  })
+  // #endif
+}
+</script>
+
+<template>
+  <x-drawer v-model:show="show" position="bottom" size="auto" :show-title="false" :show-close="true"
+    content-margin="0" round="28" max-height="92%">
+    <view v-if="show" class="login">
+      <view class="login-hero">
+        <video class="login-video" src="/static/promotional_video.webm" :autoplay="true" :loop="true" :muted="true"
+          :controls="false" :show-center-play-btn="false" :show-play-btn="false" :show-fullscreen-btn="false"
+          :enable-progress-gesture="false" object-fit="cover" />
+        <view class="video-fade"></view>
+      </view>
+      <view class="login-content">
+        <view class="login-heading">
+          <image src="/static/h2.png" mode="aspectFit" class="login-logo" />
+          <x-text label="嗨，欢迎回来" font-size="25" class="text-weight-b" />
+        </view>
+        <view class="login-description"><x-text label="登录后更精彩，美好出行从此开始" color="#68756f" font-size="14" /></view>
+        <x-button :block="true" height="48" :color="themePrimary" @click="openPortal">HydCraft Portal 账号登录</x-button>
+        <view class="login-agreement">
+          <x-checkbox v-model="agreed" :value="true" :un-check-value="false" size="18" />
+          <view class="agreement-copy">
+            <text class="taxi-type">我已阅读并同意</text>
+            <text class="taxi-type agreement-link" :style="{ color: themePrimary }" @click="legalDocument = 'privacy'">《交通信息单一窗口隐私政策》</text>
+            <text class="taxi-type agreement-link" :style="{ color: themePrimary }" @click="legalDocument = 'service'">《聚合出租服务协议》</text>
+          </view>
+        </view>
+        <view class="login-links">
+          <x-text label="游客浏览" font-size="13" color="#68756f" @click="show = false" />
+          <x-text label="登录遇到问题" font-size="13" color="#68756f" @click="helpOpen = true" />
+        </view>
+      </view>
+    </view>
+  </x-drawer>
+  <LegalDrawer :document="legalDocument" @close="legalDocument = ''" />
+  <x-drawer v-model:show="helpOpen" title="登录帮助" size="auto" :show-close="true">
+    <view class="login-help">
+      <x-text label="使用 HydCraft Portal 账号完成授权后，将自动返回当前页面。" font-size="14" color="#526a63" />
+      <x-text label="如登录页面无法打开，请检查网络后重试。账号密码、账号恢复或授权异常，请通过 Portal 登录页的帮助入口处理。" font-size="14" color="#526a63" />
+    </view>
+  </x-drawer>
+</template>
+
+<style scoped>
+.login { padding-bottom: 12px; }
+.login-hero { position: relative; height: 180px; overflow: hidden; border-radius: 28px 28px 0 0; }
+.login-video { width: 100%; height: 180px; }
+.video-fade { position: absolute; left: 0; right: 0; bottom: 0; height: 30%; background-image: linear-gradient(to bottom, rgba(255,255,255,0), #ffffff); pointer-events: none; }
+.login-content { padding: 8px 22px 12px; }
+.login-heading { flex-direction: row; align-items: center; }
+.login-logo { width: 42px; height: 42px; margin-right: 10px; }
+.login-description { margin-top: 8px; margin-bottom: 24px; }
+.login-agreement { flex-direction: row; align-items: flex-start; margin-top: 16px; }
+.agreement-copy { flex: 1; flex-direction: row; flex-wrap: wrap; margin-left: 6px; font-size: 12px; line-height: 20px; color: #68756f; }
+.agreement-link { font-size: 12px; line-height: 20px; }
+.login-links { flex-direction: row; justify-content: space-between; margin-top: 22px; padding: 8px 0; }
+.login-help { padding: 4px 4px 24px; }
+</style>

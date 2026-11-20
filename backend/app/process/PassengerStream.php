@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace app\process;
-use app\domain\{Booking, Db, Env, SystemLog};
+use app\domain\{Booking, Clients, Db, Env, SystemLog};
 use Workerman\{Worker, Timer};
 use Workerman\Connection\TcpConnection;
 use Workerman\Protocols\Http\Request;
@@ -60,19 +60,13 @@ final class PassengerStream
             hash('sha256', (string) $r->cookie('tl_session', '')),
             time(),
         ]);
-        if (
-            !$session ||
-            $r->path() !== '/ws' ||
-            !in_array(
-                $origin,
-                [
-                    Env::get('APP_ORIGIN', 'http://localhost:5173'),
-                    Env::get('ADMIN_ORIGIN', 'http://localhost:5174'),
-                ],
-                true,
-            )
-        ) {
-            SystemLog::record('passenger', 'connection_rejected', $c->id, result: $session ? 'origin_or_path' : 'session_required');
+        if (!$session || $r->path() !== '/ws' || !Clients::allowed($origin)) {
+            SystemLog::record(
+                'passenger',
+                'connection_rejected',
+                $c->id,
+                result: $session ? 'origin_or_path' : 'session_required',
+            );
             $c->close();
             return;
         }

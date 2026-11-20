@@ -2,6 +2,12 @@
 
 API 前缀 `/api`，JSON 请求/响应。同源部署，HttpOnly Cookie `tl_session` 鉴权；写请求还须携带 `/me` 返回的 `X-CSRF-Token`。错误格式 `{error:{code,message}}`，使用对应 HTTP 状态码。
 
+待发布的多端接入：`GET/POST /admin/passenger-clients` 仅平台管理员可用，POST 为 `{origins:["https://passv2.example.com"]}`。返回 `{origins,primary}`；原 APP_ORIGIN 和可选 PASSENGER_ORIGINS 始终保留。新乘客端登录使用 `/auth/start?clientOrigin=<当前源>&returnTo=<本地路径>`，需在 Portal 登记该源的 `/api/auth/callback`，来源在服务端 state 中绑定；HTTP 与 WebSocket 共用来源白名单。
+
+`GET/POST /admin/media/settings` 仅平台管理员可用，POST 为 `{bucket,region,publicUrl,secretId,secretKey}`。凭据留空保留现有值；返回只含公开配置、`configured`、`secretIdConfigured`、`secretKeyConfigured`、`maxBytes`，不返回凭据。数据库保存加密配置后即时生效，优先于旧环境变量。
+
+`POST /quotes` 继续接受 `{pickupId,dropoffId,passengers}`，在原 `{id,expires,offers,unavailable}` 上增加 `complete`、`warning`。整次网关预览等待预算 18 秒、最多 4 路并发；超过预算返回已完成报价及提示，全部失败时返回 JSON 错误。成功路线缓存 20 秒，计费仍每次计算；下单/派车校验保持有效。建议客户端超时至少 25 秒，并处理空响应、非 JSON 网关错误和部分报价。
+
 | 方法       | 路径                                | 用途                                                          |
 | ---------- | ----------------------------------- | ------------------------------------------------------------- |
 | GET        | `/health`                           | 服务状态、演示标识                                            |
@@ -15,7 +21,7 @@ API 前缀 `/api`，JSON 请求/响应。同源部署，HttpOnly Cookie `tl_sess
 | POST       | `/orders`                           | `{quoteId,companyIds,vehicleId?}`；必需 `Idempotency-Key`     |
 | GET        | `/orders?page=1`                    | 本人订单，30 条/页                                            |
 | GET        | `/orders/{id}`                      | 本人订单与轨迹、遥测                                          |
-| GET        | `/orders/{id}/events`               | 本人订单动态、支付记录                                    |
+| GET        | `/orders/{id}/events`               | 本人订单动态、支付记录                                        |
 | POST       | `/orders/{id}/depart`               | 已在上车点时确认发车                                          |
 | POST       | `/orders/{id}/cancel`               | 提交取消请求                                                  |
 | POST       | `/orders/{id}/pay`                  | 演示付款/退款，不连接货币系统                                 |

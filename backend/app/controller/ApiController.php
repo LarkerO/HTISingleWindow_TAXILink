@@ -3,6 +3,7 @@ declare(strict_types=1);
 namespace app\controller;
 use app\domain\{
     Announcements,
+    Clients,
     Media,
     Admin,
     AppError,
@@ -79,11 +80,13 @@ final class ApiController
             }
             $state = Db::id();
             $destination = $r->get('destination') === 'admin' ? 'admin' : 'passenger';
+            $clientOrigin = $destination === 'admin' ? null : Clients::loginOrigin($r);
             $verifier = Portal::verifier();
             Db::insert('oauth_states', [
                 'id' => hash('sha256', $state),
                 'verifier' => $verifier,
                 'destination' => $destination,
+                'client_origin' => $clientOrigin,
                 'return_to' => Auth::returnPath((string) $r->get('returnTo', '/')),
                 'expires' => time() + 600,
             ]);
@@ -91,7 +94,7 @@ final class ApiController
                 Portal::authorize(
                     Env::get('PORTAL_ISSUER'),
                     Env::get('PORTAL_CLIENT_ID'),
-                    Auth::oauthRedirect($destination),
+                    Auth::oauthRedirect($destination, $clientOrigin),
                     $state,
                     $verifier,
                 ),
@@ -123,14 +126,17 @@ final class ApiController
                 Env::get('PORTAL_ISSUER'),
                 Env::get('PORTAL_CLIENT_ID'),
                 Env::get('PORTAL_CLIENT_SECRET'),
-                Auth::oauthRedirect($entry['destination']),
+                Auth::oauthRedirect($entry['destination'], $entry['client_origin'] ?? null),
                 $code,
                 $entry['verifier'],
             );
             $session = Auth::login($profile);
             return redirect(
                 rtrim(
-                    Env::get($entry['destination'] === 'admin' ? 'ADMIN_ORIGIN' : 'APP_ORIGIN'),
+                    $entry['destination'] === 'admin'
+                        ? Env::get('ADMIN_ORIGIN')
+                        : ($entry['client_origin'] ?:
+                        Env::get('APP_ORIGIN')),
                     '/',
                 ) . Auth::returnPath($entry['return_to'] ?? '/'),
             )->withHeaders([
@@ -145,10 +151,7 @@ final class ApiController
                 throw new AppError('NOT_FOUND', '接口不存在', 404);
             }
             $origin = $r->header('origin');
-            if (
-                $origin &&
-                !in_array($origin, [Env::get('APP_ORIGIN'), Env::get('ADMIN_ORIGIN')], true)
-            ) {
+            if ($origin && !Clients::allowed($origin)) {
                 throw new AppError('ORIGIN_INVALID', '请求来源无效', 403);
             }
             RateLimit::check('demo:' . $r->getRealIp(), 10);
@@ -180,6 +183,18 @@ final class ApiController
             Auth::csrf($r, $u);
         }
         $input = $method === 'GET' ? [] : $r->post();
+        if ($path === '/api/admin/passenger-clients') {
+            Auth::platform($u);
+            if ($method === 'GET') {
+                return Clients::settings();
+            }
+            if ($method === 'POST') {
+                return Clients::save($u, $input);
+            }
+        }
+        if ($method === 'POST' && $path === '/api/admin/media/settings') {
+            return Media::save($u, $input);
+        }
         if ($method === 'GET' && $path === '/api/admin/media/settings') {
             Auth::platform($u);
             return Media::settings();

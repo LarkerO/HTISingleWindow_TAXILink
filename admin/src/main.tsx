@@ -1,6 +1,7 @@
 import CashierSettingsPage from './CashierSettingsPage';
 import AnnouncementsPage from './AnnouncementsPage';
 import MediaSettingsPage from './MediaSettingsPage';
+import PassengerClientsPage from './PassengerClientsPage';
 import MediaField from './MediaField';
 import { BlueMapSettingsPage } from './BlueMapSettingsPage';
 import { BlueMap } from './BlueMap';
@@ -63,6 +64,7 @@ const menus = [
   { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
   { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
   { path: '/media', name: 'COS 图片存储', icon: <SettingOutlined /> },
+  { path: '/passenger-clients', name: '乘客端接入', icon: <SettingOutlined /> },
   { path: '/overview', name: '运营总览', icon: <DashboardOutlined /> },
   { path: '/system_logs', name: '系统日志', icon: <UnorderedListOutlined /> },
   { path: '/orders', name: '订单与调度', icon: <UnorderedListOutlined /> },
@@ -199,7 +201,9 @@ function AdminApp() {
         setPoints(p);
         setGroups(g);
         setScope(s.pointIds);
-      } else if (['bluemap', 'announcements', 'media', 'cashier'].includes(r)) {
+      } else if (
+        ['bluemap', 'announcements', 'media', 'cashier', 'passenger-clients'].includes(r)
+      ) {
         setRows([]);
       } else if (r === 'fare') {
         const c = companies.find((c) => c.id === company);
@@ -622,6 +626,7 @@ function AdminApp() {
               '/bluemap',
               '/announcements',
               '/media',
+              '/passenger-clients',
             ].includes(m.path),
         ),
       }}
@@ -1006,6 +1011,10 @@ function AdminApp() {
               .map((c) => ({ id: String(c.id), name: String(c.name) }))}
             platformAdmin={user.platformAdmin}
           />
+        ) : page === '/passenger-clients' ? (
+          user.platformAdmin ? (
+            <PassengerClientsPage />
+          ) : null
         ) : page === '/media' ? (
           user.platformAdmin ? (
             <MediaSettingsPage />

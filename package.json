@@ -9,11 +9,14 @@
     "dev:admin": "npm run dev -w admin",
     "dev:passenger": "npm run dev -w passenger",
     "build": "npm run build --workspaces",
-    "test": "php backend/tests/domain.php && php backend/tests/bootstrap.php && npm run test:oauth",
+    "test": "php backend/tests/domain.php && php backend/tests/bootstrap.php && npm run test:oauth && npm run test:quotes && npm run test:resilience",
     "test:cashier": "php backend/tests/cashier.php",
     "test:database": "php backend/tests/database.php",
     "test:oauth": "node --test tests/oauth/*.test.mjs",
-    "test:api": "node --test tests/*.test.mjs",
+    "test:quotes": "node --test tests/quote-routes.test.mjs",
+    "test:resilience": "node --test tests/frontend-resilience.test.mjs",
+    "test:ui-resilience": "node --test tests/ui-resilience.test.mjs",
+    "test:api": "node --test tests/api.test.mjs",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

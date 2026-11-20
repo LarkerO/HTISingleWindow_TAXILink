@@ -5,8 +5,18 @@ use support\Request;
 
 final class Auth
 {
-    public static function oauthRedirect(string $destination): string
+    public static function oauthRedirect(string $destination, ?string $origin = null): string
     {
+        if (
+            $destination !== 'admin' &&
+            $origin &&
+            $origin !== Env::get('APP_ORIGIN', 'http://localhost:5173')
+        ) {
+            if (!in_array($origin, Clients::passengers(), true)) {
+                throw new AppError('ORIGIN_INVALID', '此乘客端尚未登记', 403);
+            }
+            return $origin . '/api/auth/callback';
+        }
         return $destination === 'admin'
             ? (Env::get('PORTAL_ADMIN_REDIRECT_URI') ?:
                 rtrim(Env::get('ADMIN_ORIGIN'), '/') . '/api/auth/callback')
@@ -42,12 +52,10 @@ final class Auth
             throw new AppError('CSRF_INVALID', '页面已过期，请刷新后重试', 403);
         }
         $origin = $request->header('origin');
-        $passenger = Env::get('APP_ORIGIN', 'http://localhost:5173');
-        $admin = Env::get('ADMIN_ORIGIN', 'http://localhost:5174');
-        if ($origin && !in_array($origin, [$passenger, $admin], true)) {
+        if ($origin && !Clients::allowed($origin)) {
             throw new AppError(
                 'ORIGIN_INVALID',
-                "当前站点地址与后端配置不一致。请从乘客端 $passenger 或管理端 $admin 打开，核对协议、主机名和端口。",
+                '当前乘客端尚未登记，请联系平台管理员在“乘客端接入”中添加此站点地址。',
                 403,
             );
         }

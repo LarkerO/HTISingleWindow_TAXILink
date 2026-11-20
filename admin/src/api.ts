@@ -1,3 +1,4 @@
+import { apiRequest } from '../../shared/http';
 export interface User {
   id: string;
   username: string;
@@ -15,15 +16,12 @@ export async function api<T = any>(
   body?: unknown,
   method = body === undefined ? 'GET' : 'POST',
 ): Promise<T> {
-  const r = await fetch('/api' + path, {
+  return apiRequest<T>('/api' + path, {
     method,
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const d = await r.json();
-  if (!r.ok) throw new Error(d.error?.message || '请求失败');
-  return d;
 }
 export const money = (n: number) => `${(n / 100).toFixed(2)} 游戏币`;
 export const states: Record<string, string> = {

@@ -1,4 +1,5 @@
 import { ref } from 'vue';
+import { apiRequest, ApiError } from '../../shared/http';
 export interface User {
   id: string;
   username: string;
@@ -80,25 +81,24 @@ export async function api<T>(
   method = body === undefined ? 'GET' : 'POST',
   extra: Record<string, string> = {},
 ): Promise<T> {
-  const r = await fetch('/api' + path, {
-    method,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(user.value ? { 'X-CSRF-Token': user.value.csrf } : {}),
-      ...extra,
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const value = await r.json();
-  if (!r.ok) {
-    if (r.status === 401) {
+  try {
+    return await apiRequest<T>('/api' + path, {
+      method,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(user.value ? { 'X-CSRF-Token': user.value.csrf } : {}),
+        ...extra,
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) {
       user.value = null;
       loginVisible.value = true;
     }
-    throw new Error(value.error?.message || '请求失败，请稍后重试');
+    throw e;
   }
-  return value;
 }
 export async function refreshUser() {
   if (refreshing) return refreshing;
