@@ -11,7 +11,7 @@ export function blueMapHealthScript(failureUrl = ''): string {
         clearInterval(timer);
         if (${JSON.stringify(failureUrl)}) { location.replace(${JSON.stringify(failureUrl)}); return; }
       }
-      parent.postMessage({ type: 'taxilink-bluemap-health', status }, location.origin);
+      parent.postMessage({ type: 'taxilink-bluemap-health', status }, (location.origin === 'null' ? new URL(document.baseURI).origin : location.origin));
     };
     const lost = () => report('failed');
     const check = () => {

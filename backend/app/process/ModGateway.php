@@ -63,6 +63,7 @@ final class ModGateway
                     JSON_THROW_ON_ERROR | JSON_BIGINT_AS_STRING,
                 );
                 $allowed = [
+                    'player.position',
                     'taxi.quote',
                     'taxi.create',
                     'taxi.status',

@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { Button as AButton, Switch as ASwitch } from 'ant-design-vue';
+import { ownBlueMapPosition } from '../../../shared/bluemap-player';
+import { api, user } from '../api';
+import { blueMapEmbed } from '../../../shared/bluemap-embed';
+import MapTile from './MapTile.vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
   blueMap3dUrl,
   blueMapTiles,
@@ -14,6 +19,46 @@ const props = defineProps<{
   home?: boolean;
   hideVehicle?: boolean;
 }>();
+const settings = ref<BlueMapSettings>();
+const playerPosition = ref<{ x: number; z: number } | null>(null);
+watch(
+  () => [user.value?.username, settings.value, props.home],
+  (_, __, cleanup) => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    playerPosition.value = null;
+    async function poll() {
+      if (!props.home || !user.value || !settings.value) return;
+      try {
+        const value = await ownBlueMapPosition(
+          settings.value,
+          user.value.username,
+          controller.signal,
+        );
+        if (value == null) throw new Error('BlueMap 未提供玩家位置');
+        if (!controller.signal.aborted) playerPosition.value = value;
+      } catch {
+        try {
+          const result = await api<{ online: boolean; position: { x: number; z: number } | null }>(
+            '/me/map-position',
+          );
+          if (!controller.signal.aborted)
+            playerPosition.value = result.online ? result.position : null;
+        } catch {
+          if (!controller.signal.aborted) playerPosition.value = null;
+        }
+      }
+      if (!controller.signal.aborted) timer = setTimeout(poll, 10000);
+    }
+    void poll();
+    cleanup(() => {
+      controller.abort();
+      clearTimeout(timer);
+    });
+  },
+  { immediate: true },
+);
+const shading = ref(true);
 const scale = ref(1),
   pan = ref({ x: 0, y: 0 }),
   pointers = new Map<number, { x: number; y: number }>();
@@ -51,7 +96,6 @@ function receiveHealth(event: MessageEvent) {
   if (event.data.status === 'failed') fallback3d();
   if (event.data.status === 'ready') clearTimeout(healthDeadline);
 }
-const settings = ref<BlueMapSettings>();
 const failed = ref(false);
 const request = new AbortController();
 onMounted(async () => {
@@ -71,7 +115,10 @@ const source = computed(() => props.geometry?.points ?? []);
 const bounds = computed(() => {
   const [x, z] = settings.value?.startPos ?? [0, 0];
   const p = source.value;
-  if (!p.length) return { x: x - 300, z: z - 300, w: 600, h: 600 };
+  if (!p.length) {
+    const center = playerPosition.value ?? { x, z };
+    return { x: center.x - 300, z: center.z - 300, w: 600, h: 600 };
+  }
   const xs = p.map((v) => v[1]),
     zs = p.map((v) => v[3]);
   return {
@@ -111,7 +158,7 @@ const tiles = computed(() => {
   );
 });
 const marker = computed(() => {
-  const p = props.position;
+  const p = props.home ? playerPosition.value : props.position;
   return p ? project(p.x, p.z) : start.value;
 });
 const start = computed(() => {
@@ -125,8 +172,12 @@ const end = computed(() => {
 function pointer(e: PointerEvent) {
   const box = (e.currentTarget as SVGElement).getBoundingClientRect();
   return {
-    x: ((e.clientX - box.left) * 400) / box.width,
-    y: ((e.clientY - box.top) * 420) / box.height,
+    x: new DOMPoint(e.clientX, e.clientY).matrixTransform(
+      (e.currentTarget as SVGSVGElement).getScreenCTM()!.inverse(),
+    ).x,
+    y: new DOMPoint(e.clientX, e.clientY).matrixTransform(
+      (e.currentTarget as SVGSVGElement).getScreenCTM()!.inverse(),
+    ).y,
   };
 }
 function down(e: PointerEvent) {
@@ -159,17 +210,23 @@ function move(e: PointerEvent) {
     if (d(old) > 1) zoom(d(now) / d(old), center);
   }
 }
-function toggleView() {
+async function toggleView() {
   stopHealth();
   mapNotice.value = '';
   if (!view3d.value && settings.value) {
     const b = bounds.value;
-    view3dUrl.value = blueMap3dUrl(
-      settings.value,
-      b.x + b.w / 2,
-      b.z + b.h / 2,
-      Math.max(b.w, b.h),
-    );
+    try {
+      view3dUrl.value = await blueMapEmbed(
+        settings.value,
+        b.x + b.w / 2,
+        b.z + b.h / 2,
+        Math.max(b.w, b.h),
+        request.signal,
+      );
+    } catch {
+      fallback3d();
+      return;
+    }
     healthTimer = setInterval(checkHealth, 500);
     healthDeadline = setTimeout(fallback3d, 22000);
   }
@@ -192,7 +249,7 @@ function follow() {
       @load="checkHealth"
       @error="fallback3d"
       title="BlueMap 3D 地图"
-      :src="view3dUrl"
+      :srcdoc="view3dUrl"
       style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0"
     />
     <svg
@@ -210,10 +267,11 @@ function follow() {
       <g
         :transform="`translate(${200 + pan.x},${210 + pan.y}) scale(${scale}) translate(-200,-210)`"
       >
-        <image
+        <MapTile
           v-for="tile in tiles"
           :key="tile.url"
-          :href="tile.url"
+          :url="tile.url"
+          :shading="shading"
           :x="project(tile.x, tile.z).x"
           :y="project(tile.x, tile.z).y"
           :width="project(tile.x + tile.width, tile.z).x - project(tile.x, tile.z).x"
@@ -255,7 +313,7 @@ function follow() {
           stroke-width="3"
         />
         <circle
-          v-if="!home && !hideVehicle && position"
+          v-if="(home && playerPosition) || (!home && !hideVehicle && position)"
           :cx="marker.x"
           :cy="marker.y"
           r="17"
@@ -263,7 +321,7 @@ function follow() {
           opacity=".14"
         />
         <circle
-          v-if="!home && !hideVehicle && position"
+          v-if="(home && playerPosition) || (!home && !hideVehicle && position)"
           :cx="marker.x"
           :cy="marker.y"
           r="7"
@@ -277,22 +335,34 @@ function follow() {
       {{ failed ? 'BlueMap 底图暂不可用' : settings ? 'BlueMap' : '正在加载底图'
       }}<span>双指缩放 · 拖动查看</span>
     </div>
+    <div v-if="home && playerPosition" class="map-player-label" role="status">我的游戏位置</div>
     <div v-if="mapNotice" class="map-recovery-note" role="status">{{ mapNotice }}</div>
     <div class="map-controls">
-      <button
+      <a-switch
+        v-if="!view3d"
+        v-model:checked="shading"
+        checked-children="光照"
+        un-checked-children="纯色"
+        aria-label="高度光照叠加"
+      />
+      <a-button
         v-if="settings?.allow3d"
         :aria-label="view3d ? '切换到 2D' : '切换到 3D'"
         @click="toggleView"
       >
         {{ view3d ? '2D' : '3D' }}
-      </button>
+      </a-button>
       <template v-if="!view3d">
-        <button aria-label="放大地图" @click="zoom(1.4)">＋</button
-        ><button aria-label="缩小地图" @click="zoom(0.7)">−</button
-        ><button aria-label="回原点" @click="reset">⌖</button
-        ><button v-if="!home && !hideVehicle && position" aria-label="定位车辆" @click="follow">
+        <a-button aria-label="放大地图" @click="zoom(1.4)">＋</a-button
+        ><a-button aria-label="缩小地图" @click="zoom(0.7)">−</a-button
+        ><a-button aria-label="回原点" @click="reset">⌖</a-button
+        ><a-button
+          v-if="(home && playerPosition) || (!home && !hideVehicle && position)"
+          aria-label="定位车辆"
+          @click="follow"
+        >
           ◎
-        </button>
+        </a-button>
       </template>
     </div>
   </div>

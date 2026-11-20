@@ -1,0 +1,138 @@
+<script setup lang="ts">
+import AnnouncementNotice from '../components/AnnouncementNotice.uvue'
+import BrandFooter from '../components/BrandFooter.uvue'
+import { themePrimary, themeTint } from '../lib/theme'
+import { computed, ref, watch } from 'vue'
+import MapSheet from '../components/MapSheet.uvue'
+import MainNav from '../components/MainNav.uvue'
+import LoginDrawer from '../components/LoginDrawer.uvue'
+import { api, user, demo, refreshUser, notify } from '../lib/api'
+import { pickup, dropoff, swapPoints } from '../lib/booking'
+import { go } from '../lib/navigation'
+
+import { loadBlueMap } from '../lib/bluemap'
+import type { Position } from '../lib/models'
+type LivePlayer = { name: string; foreign: boolean; position: Position }
+type LivePlayers = { players: LivePlayer[] }
+type LocationResult = { online: boolean; position: Position | null }
+const playerPosition = ref<Position | null>(null)
+const active = ref<boolean>(false)
+watch((): string => active.value ? (user.value?.username ?? '') : '', (name: string, _old: string, cleanup): void => {
+  let current = true
+  let timer: number = 0
+  playerPosition.value = null
+  async function poll(): Promise<void> {
+    if (!current || name.length == 0) return
+    let position: Position | null = null
+    try {
+      const map = await loadBlueMap()
+      const data = await new Promise<LivePlayers>((resolve, reject) => {
+        uni.request({ url: map.root + '/live/players.json', timeout: 5000,
+          success: (result) => { if (result.statusCode == 200) resolve(result.data as LivePlayers); else reject(new Error('位置不可用')) },
+          fail: (error) => reject(error) })
+      })
+      const matches = data.players.filter((p: LivePlayer): boolean => p.name == name && p.foreign == false)
+      if (matches.length == 1 && Number.isFinite(matches[0].position.x) && Number.isFinite(matches[0].position.z)) position = matches[0].position
+    } catch (_) {}
+    if (position == null && current) {
+      try { const result = await api<LocationResult>('/me/map-position'); if (result.online) position = result.position } catch (_) {}
+    }
+    if (current) { playerPosition.value = position; timer = setTimeout((): void => { poll() }, 10000) }
+  }
+  poll()
+  cleanup((): void => { current = false; clearTimeout(timer) })
+}, { immediate: true })
+onHide((): void => { active.value = false })
+onUnload((): void => { active.value = false })
+const login = ref<boolean>(false)
+const portalReturn = ref<boolean>(false)
+const routeReady = computed((): boolean => pickup.value != null && dropoff.value != null &&
+  pickup.value.id != dropoff.value.id)
+const samePoint = computed((): boolean => pickup.value != null && pickup.value.id == dropoff.value?.id)
+
+function openVehicles(): void { go('vehicles') }
+
+async function book(): Promise<void> {
+  if (!routeReady.value) return
+  try {
+    await refreshUser()
+    if (user.value != null) openVehicles()
+    else login.value = true
+  } catch (error) { notify(error) }
+}
+
+onLoad(() => {
+  // #ifdef WEB
+  const query = new URLSearchParams(window.location.search)
+  if (query.has('nativePortal')) {
+    portalReturn.value = true
+    return
+  }
+  const paidOrder = query.get('orderId')
+  if (window.location.pathname == '/payment-return' && paidOrder != null && /^[a-f0-9]{32}$/.test(paidOrder)) {
+    window.history.replaceState(window.history.state, '', '/' + window.location.hash)
+    go('checkout?id=' + paidOrder)
+    return
+  }
+  const resume = query.get('resume')
+  const invite = query.get('invite')
+  const path = window.location.pathname.slice(1)
+  if (resume != null || invite != null || /^(orders|profile|vehicles|announcements|(announcement|trip|checkout)\/[a-z0-9-]+)$/.test(path)) {
+    const legacy = path.replace(/^(announcement|trip|checkout)\//, '$1?id=')
+    const route = invite != null ? 'profile?invite=' + encodeURIComponent(invite) :
+      (resume ?? legacy)
+    window.history.replaceState(window.history.state, '', '/' + window.location.hash)
+    if (/^(vehicles|orders|announcements|profile(\?invite=[^&#]+)?|(announcement|trip|checkout)\?id=[a-z0-9-]+)$/.test(route)) {
+      go(route)
+    }
+  }
+  // #endif
+})
+onShow(() => {
+  active.value = true
+  if (!portalReturn.value) refreshUser().catch((): void => {})
+})
+</script>
+
+<template>
+  <x-sheet v-if="portalReturn" margin="16" padding="18">
+    <x-text label="正在返回 TAXILink App" font-size="18" />
+  </x-sheet>
+  <MapSheet v-else title="TAXILink" :peek="400" :position="playerPosition ?? undefined">
+    <view class="home-panel">
+      <AnnouncementNotice placement="booking" />
+      <view class="metric-row mb-12">
+        <x-text label="你要去哪儿？" font-size="25" class="text-weight-b" />
+        <x-tag v-if="demo" size="small" :color="themeTint" :font-color="themePrimary">演示</x-tag>
+        <x-text v-else label="轨道打车" font-size="12" color="#526a63" />
+      </view>
+      <view class="station-box">
+        <view class="station-rows">
+          <x-cell :title="pickup?.name ?? '选择上车点'" title-size="15" icon="radio-button-line" icon-size="18" :padding="['6', '0']"
+            icon-color="#00886a" color="#edf4f1" :show-bottom-border="true" @click="go('points?which=pickup')" />
+          <x-cell :title="dropoff?.name ?? '选择下车点'" title-size="15" icon="map-pin-2-line" icon-size="18" :padding="['6', '0']"
+            icon-color="#b66322" color="#edf4f1" @click="go('points?which=dropoff')" />
+        </view>
+        <view class="swap-control">
+          <x-button size="small" icon="arrow-up-down-line" color="#ffffff" :font-color="themePrimary"
+            :disabled="pickup == null || dropoff == null" @click="swapPoints" />
+        </view>
+      </view>
+      <x-text v-if="samePoint"
+        label="请选择不同的上下车点" font-size="12" color="#a94d1b" class="mt-4" />
+      <x-button :block="true" :disabled="!routeReady" :color="themePrimary" height="46"
+        class="mt-12" @click="book">查看车辆与报价</x-button>
+    </view>
+    <BrandFooter />
+    <MainNav active="home" />
+    <view class="safe-bottom"></view>
+  </MapSheet>
+  <LoginDrawer v-model:show="login" resume="vehicles" @success="openVehicles" />
+</template>
+
+<style scoped>
+.home-panel { padding: 0 16px 10px; }
+.station-box { flex-direction: row; align-items: center; border-radius: 16px; background-color: #edf4f1; padding-right: 10px; overflow: hidden; }
+.station-rows { flex: 1; }
+.swap-control { justify-content: center; align-self: stretch; }
+</style>

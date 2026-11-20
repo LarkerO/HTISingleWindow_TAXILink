@@ -53,6 +53,7 @@ const camera = computed((): Camera => {
     fit = Math.min((props.width - 70) / Math.max(100, maxX - minX),
       (props.fitHeight - 80) / Math.max(100, maxZ - minZ))
   }
+  if (points.value.length == 0 && props.position != null) { x = props.position.x; z = props.position.z }
   const scale = Math.max(0.025, fit * zoom.value)
   return { x: x - offset.value.x / scale, z: z - offset.value.y / scale, scale, width: props.width, height: props.height }
 })

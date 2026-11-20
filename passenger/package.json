@@ -8,6 +8,7 @@
     "build": "vue-tsc --noEmit && vite build"
   },
   "dependencies": {
+    "ant-design-vue": "^4.2.6",
     "dompurify": "^3.4.18",
     "markdown-it": "^15.0.3",
     "tdesign-icons-vue-next": "^0.4.0",

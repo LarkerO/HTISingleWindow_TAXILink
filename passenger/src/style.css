@@ -292,7 +292,7 @@ main {
   cursor: grab;
 }
 .route-map.home svg {
-  transform: scale(1.4);
+  transform: none;
 }
 .map-caption {
   position: absolute;
@@ -1030,3 +1030,5 @@ img.company-mark {
 .trip-branding {
   padding: 8px 16px;
 }
+
+.map-player-label { position:absolute; left:12px; top:12px; background:#ffffffed; padding:6px 10px; border-radius:6px; font-size:12px; pointer-events:none; }

@@ -144,8 +144,8 @@ async function mapFixture(page) {
       contentType: 'text/html',
       body:
         mode === 'failed'
-          ? '<body><div id="bm-app-err">Failed to load BlueMap webapp!</div></body>'
-          : `<body><canvas width="390"></canvas><script>window.bluemap={mapViewer:{map:{},data:{superSampling:2,loadedHiresViewDistance:200},renderer:{domElement:document.querySelector('canvas'),getContext:()=>({isContextLost:()=>window.lost===true}),info:{render:{calls:1}}},updateLoadedMapArea(){}}};</script></body>`,
+          ? '<html><head></head><body><div id="bm-app-err">Failed to load BlueMap webapp!</div></body>'
+          : `<html><head></head><body><canvas width="390"></canvas><script>window.bluemap={mapViewer:{map:{},data:{superSampling:2,loadedHiresViewDistance:200},renderer:{domElement:document.querySelector('canvas'),getContext:()=>({isContextLost:()=>window.lost===true}),info:{render:{calls:1}}},updateLoadedMapArea(){}}};</script></body>`,
     });
   });
   return { healthy: () => (mode = 'ready') };
@@ -170,7 +170,7 @@ test('Vue v1 地图初始化失败及 WebGL 丢失后恢复 2D', { timeout: 2500
     await expect
       .poll(() => page.locator('iframe').contentFrame().locator('canvas').count())
       .toBe(1);
-    const frame = page.frames().find((frame) => frame.url().includes('/bluemap/'));
+    const frame = page.frames().find((frame) => frame.parentFrame() === page.mainFrame());
     await frame.waitForFunction(() => window.__taxilinkMapHealth);
     await expect(page.locator('iframe')).toHaveCount(1);
     await frame.evaluate(() => (window.lost = true));
@@ -315,6 +315,101 @@ test('管理员日志搜索和车辆控制携带正确参数', { timeout: 30000 
     await page.screenshot({ path: artifacts + '/operations-error.png', fullPage: true });
     console.error((await page.locator('body').innerText()).slice(-2200));
     throw error;
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+test('Vue v1 正确解码双色瓦片、拖拽并显示当前在线玩家', { timeout: 30000 }, async () => {
+  const server = await serve('passenger/dist'),
+    browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await mapFixture(page);
+    await page.route('**/api/me', (r) =>
+      r.fulfill({ json: { user: { ...user, username: 'PlayerOne' }, demo: false } }),
+    );
+    await page.route('**/live/players.json', (r) =>
+      r.fulfill({
+        json: {
+          players: [
+            { name: 'Other', foreign: false, position: { x: 9, z: 9 } },
+            { name: 'PlayerOne', foreign: false, position: { x: 123, y: 64, z: 456 } },
+          ],
+        },
+      }),
+    );
+    await page.goto(server.base);
+    const png = await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 8;
+      c.height = 16;
+      const x = c.getContext('2d');
+      x.fillStyle = '#ff0000';
+      x.fillRect(0, 0, 8, 8);
+      x.fillStyle = '#0000ff';
+      x.fillRect(0, 8, 8, 8);
+      return c.toDataURL().split(',')[1];
+    });
+    await page.route('**/tiles/**/*.png', (r) =>
+      r.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') }),
+    );
+    await page.reload();
+    await expect(page.getByText('我的游戏位置')).toBeVisible();
+    const map = page.locator('.route-map svg').first();
+    const tile = map.locator('image').first();
+    await expect(tile).toHaveAttribute('href', /^data:image/);
+    const pixel = await tile.evaluate(async (el) => {
+      const image = new Image();
+      image.src = el.getAttribute('href');
+      await image.decode();
+      const c = document.createElement('canvas');
+      c.width = image.width;
+      c.height = image.height;
+      const x = c.getContext('2d');
+      x.drawImage(image, 0, 0);
+      return { h: image.height, p: [...x.getImageData(0, image.height - 1, 1, 1).data] };
+    });
+    assert.equal(pixel.h, 8);
+    assert.ok(pixel.p[0] > 200 && pixel.p[2] < 20);
+    await map.scrollIntoViewIfNeeded();
+    const group = map.locator('g').first(),
+      before = await group.getAttribute('transform'),
+      box = await map.boundingBox();
+    await page.mouse.move(box.x + 80, box.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 140, box.y + 120, { steps: 5 });
+    await page.mouse.up();
+    assert.notEqual(await group.getAttribute('transform'), before);
+    await page.screenshot({ path: artifacts + '/vue-map-player-texture.png', fullPage: true });
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+test('Console 地图支持拖拽、Ant Design 控制与 3D 失败恢复', { timeout: 30000 }, async () => {
+  const server = await serve('admin/dist'),
+    browser = await launch();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  try {
+    await mapFixture(page);
+    await page.route('**/api/me', (r) => r.fulfill({ json: { user, demo: false } }));
+    await page.route('**/api/admin/**', (r) => r.fulfill({ json: [] }));
+    await page.goto(server.base + '#/depot_authorizations');
+    const map = page.getByLabel('BlueMap 世界地图');
+    await expect(map).toBeVisible();
+    await map.scrollIntoViewIfNeeded();
+    const before = await map.getAttribute('viewBox'),
+      box = await map.boundingBox();
+    await page.mouse.move(box.x + 150, box.y + 100);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 220, box.y + 140, { steps: 5 });
+    await page.mouse.up();
+    await expect(map).not.toHaveAttribute('viewBox', before);
+    await expect(page.getByRole('button', { name: /放\s*大/, exact: true })).toHaveClass(/ant-btn/);
+    await page.getByRole('button', { name: '切换到 3D' }).click();
+    await expect(page.getByText(/3D 加载失败/)).toBeVisible();
+    await expect(map).toBeVisible();
   } finally {
     await browser.close();
     await server.close();

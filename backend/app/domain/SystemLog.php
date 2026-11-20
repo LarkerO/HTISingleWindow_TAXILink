@@ -91,7 +91,7 @@ final class SystemLog
         $query = $filters['q'] ?? '';
         if (($filters['hideRoutine'] ?? '') === '1' && $query === '') {
             $where[] =
-                "NOT (COALESCE(command,'') IN ('taxi.status','taxi.geometry','taxi.logs','taxi.list') AND (event='command_sent' OR (event='command_finished' AND result='success')))";
+                "NOT (COALESCE(command,'') IN ('taxi.status','taxi.geometry','taxi.logs','taxi.list','player.position') AND (event='command_sent' OR (event='command_finished' AND result='success')))";
         }
         if (!is_string($query) || mb_strlen($query) > 128) {
             throw new AppError('VALIDATION', '日志搜索最多 128 字符', 422);
@@ -147,6 +147,7 @@ final class SystemLog
     {
         $commands = [
             'taxi.quote' => '线路预览与报价',
+            'player.position' => '读取当前玩家在线位置',
             'taxi.status' => '核对车辆状态',
             'taxi.geometry' => '读取行程轨迹',
             'taxi.logs' => '回放订单动态',

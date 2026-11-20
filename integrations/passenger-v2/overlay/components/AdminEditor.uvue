@@ -170,11 +170,13 @@ function useSeed(): void {
     accelerationMps2: item['accelerationMps2'] ?? 1, decelerationMps2: item['decelerationMps2'] ?? 1,
     vehicleCars: asRows(item['vehicleCars']) })
 }
+type MediaChoice = { id: string; name: string }
+type MediaProviders = { activeProvider: string; items: MediaChoice[] }
 async function chooseImage(): Promise<void> {
   if (uploading.value || !props.editable) return
   let provider = ''
   try {
-    const choices = await api<{ activeProvider: string; items: { id: string; name: string }[] }>('/media/providers')
+    const choices = await api<MediaProviders>('/media/providers')
     if (choices.items.length > 1) {
       provider = await new Promise<string>((resolve) => {
         uni.showActionSheet({ itemList: ['使用默认服务', ...choices.items.map((item): string => item.name)],

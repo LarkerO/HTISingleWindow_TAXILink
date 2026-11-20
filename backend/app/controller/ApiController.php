@@ -185,6 +185,17 @@ final class ApiController
             Auth::csrf($r, $u);
         }
         $input = $method === 'GET' ? [] : $r->post();
+        if ($method === 'GET' && $path === '/api/me/map-position') {
+            RateLimit::check('map-position:' . $u['id'], 30);
+            if (Env::demo()) {
+                return ['online' => false, 'position' => null];
+            }
+            try {
+                return Bridge::command('player.position', ['name' => $u['username']]);
+            } catch (AppError $e) {
+                return ['online' => false, 'position' => null, 'unavailable' => true];
+            }
+        }
         if ($method === 'GET' && $path === '/api/media/providers') {
             return ObjectStorage::choices();
         }

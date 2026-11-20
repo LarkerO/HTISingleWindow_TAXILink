@@ -59,3 +59,5 @@ resource：`companies`、`centers`、`vehicles`、`point_groups`、`points`、`m
 - `GET/POST /api/admin/cashier`：平台管理员读取/保存总商户。
 - `GET/POST /api/admin/cashier/{companyId}`：企业管理员或平台管理员读取/保存公司商户，调度员无权读取密钥配置。
 - 配置字段：`enabled`、`origin`、`merchant`、`keyId`、`privateKey`、`platformKey`、`environment`、`returnUrl`。读取不返回 API Key 与私钥，写入留空保留旧值。
+
+GET /api/me/map-position：登录用户本人在线坐标；从会话用户名匹配，返回 online、position，可含 unavailable。无数据库迁移，旧模组不支持时降级。详见 docs/MAP_PENDING_20261120.md。
