@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PromoCarousel from '../components/PromoCarousel.vue';
 import NoticeBar from '../components/NoticeBar.vue';
 import { useRouter } from 'vue-router';
 import { user, requireLogin, report } from '../api';
@@ -62,6 +63,7 @@ function swap() {
     <span>每一程都值得期待 ↗</span>
   </div>
   <div class="home-map"><RouteMap home /></div>
+  <PromoCarousel placement="home" />
   <div class="feature-strip">
     <div><span>◈</span><strong>清晰计价</strong><small>费用明细一目了然</small></div>
     <div><span>⌁</span><strong>实时轨迹</strong><small>随时掌握行程进度</small></div>

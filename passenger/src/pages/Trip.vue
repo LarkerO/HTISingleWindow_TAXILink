@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PromoCarousel from '../components/PromoCarousel.vue';
 import NoticeBar from '../components/NoticeBar.vue';
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -212,6 +213,7 @@ const eta = computed(() => {
         满员或超时也可能自动发车</span
       >
     </p>
+    <PromoCarousel placement="trip" />
   </section>
   <div v-if="confirmCancel" class="modal-backdrop">
     <section class="login-card" role="dialog" aria-modal="true">

@@ -13,6 +13,7 @@ export default function MediaField({
   purpose: string;
   company?: string;
 }) {
+  const [library, setLibrary] = useState<{ url: string; name: string; provider: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState('');
   const [providers, setProviders] = useState<{ id: string; name: string }[]>([]);
@@ -54,6 +55,24 @@ export default function MediaField({
         </Upload>
         <Button onClick={() => onChange?.('')}>清除图片</Button>
       </Space>
+      {purpose === 'announcement' && (
+        <Select
+          showSearch
+          allowClear
+          placeholder="选择已上传图片（或在下方填写原有 COS 地址）"
+          style={{ width: '100%' }}
+          onOpenChange={(open) => {
+            if (open)
+              api('/admin/media/library')
+                .then((d) => setLibrary(d.items))
+                .catch(() => {});
+          }}
+          options={library.map((i) => ({ value: i.url, label: i.provider + ' · ' + i.name }))}
+          onChange={(v) => {
+            if (v) onChange?.(v);
+          }}
+        />
+      )}
       <Input
         value={value}
         onChange={(e) => onChange?.(e.target.value)}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PromoCarousel from '../components/PromoCarousel.uvue'
 import AnnouncementNotice from '../components/AnnouncementNotice.uvue'
 import BrandFooter from '../components/BrandFooter.uvue'
 import { themePrimary, themeTint } from '../lib/theme'
@@ -123,6 +124,7 @@ onShow(() => {
       <x-button :block="true" :disabled="!routeReady" :color="themePrimary" height="46"
         class="mt-12" @click="book">查看车辆与报价</x-button>
     </view>
+    <PromoCarousel placement="home" />
     <BrandFooter />
     <MainNav active="home" />
     <view class="safe-bottom"></view>

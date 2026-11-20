@@ -1,0 +1,41 @@
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { api } from '../lib/api'
+import { go } from '../lib/navigation'
+// #ifdef APP
+import { startIntent } from '@/uni_modules/x-startintent-s'
+// #endif
+type Item = { title: string; image: string; enabled: boolean; placement: string; width: number; height: number; type: string; target: string }
+type Config = { items: Item[] }
+const props = defineProps<{placement: string}>()
+const items = ref<Item[]>([])
+const available = ref<number>(Math.max(40, uni.getWindowInfo().windowWidth - 32))
+const size = (item: Item): number => item.height * Math.min(1, available.value / item.width)
+const height = computed((): number => items.value.reduce((h: number, i: Item): number => Math.max(h, size(i)), 0))
+onResize((): void => { available.value = Math.max(40, uni.getWindowInfo().windowWidth - 32) })
+onMounted(async (): Promise<void> => {
+  try { const d = await api<Config>('/carousel'); items.value = d.items.filter((i: Item): boolean => i.enabled && i.placement == props.placement) } catch (_) {}
+})
+function open(item: Item): void {
+  if (item.type == 'announcement') { go('announcement?id=' + encodeURIComponent(item.target)); return }
+  if (!/^https?:\/\//i.test(item.target)) return
+  // #ifdef WEB
+  window.open(item.target, '_blank', 'noopener,noreferrer')
+  // #endif
+  // #ifdef APP
+  startIntent({ url: item.target })
+  // #endif
+}
+</script>
+<template>
+  <view v-if="items.length > 0" class="promo">
+    <swiper :autoplay="true" :circular="items.length > 1" :indicator-dots="items.length > 1" :interval="5000" :style="{height: height + 'px'}">
+      <swiper-item v-for="(item,index) in items" :key="index">
+        <view class="promo-slide" :style="{height: height + 'px'}">
+          <image :src="item.image" mode="aspectFit" :aria-label="item.title" :style="{width: Math.min(item.width,available) + 'px',height:size(item) + 'px'}" @click="open(item)" />
+        </view>
+      </swiper-item>
+    </swiper>
+  </view>
+</template>
+<style scoped>.promo { margin: 12px 0; width: 100%; }.promo-slide { align-items: center; justify-content: center; width: 100%; }</style>

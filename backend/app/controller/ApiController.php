@@ -63,6 +63,13 @@ final class ApiController
                 'allow3d' => (bool) ($map['allow_3d'] ?? true),
             ];
         }
+        if ($method === 'GET' && $path === '/api/carousel') {
+            $config = \app\domain\Carousel::read();
+            $config['items'] = array_values(
+                array_filter($config['items'], fn($i) => $i['enabled']),
+            );
+            return $config;
+        }
         if ($method === 'GET' && $path === '/api/points') {
             $q = trim((string) $r->get('q', ''));
             $like = Db::pgsql() ? 'ILIKE' : 'LIKE';
@@ -195,6 +202,50 @@ final class ApiController
             } catch (AppError $e) {
                 return ['online' => false, 'position' => null, 'unavailable' => true];
             }
+        }
+        if ($path === '/api/admin/carousel') {
+            Auth::platform($u);
+            return $method === 'GET'
+                ? \app\domain\Carousel::read()
+                : \app\domain\Carousel::save($u, $input);
+        }
+        if ($method === 'GET' && $path === '/api/admin/media/library') {
+            Auth::platform($u);
+            $items = [];
+            foreach (
+                Db::all(
+                    "SELECT target,data FROM audit_logs WHERE action='media.upload' ORDER BY created_at DESC LIMIT 200",
+                )
+                as $row
+            ) {
+                $data = Db::data($row['data']);
+                $provider = $data['provider'] ?? 'cos';
+                if (isset($data['url'])) {
+                    $items[] = [
+                        'url' => $data['url'],
+                        'name' => $row['target'],
+                        'provider' => $provider,
+                    ];
+                } elseif ($provider === 'cos') {
+                    $c = ObjectStorage::config('cos');
+                    if ($c['bucket'] && $c['region']) {
+                        $items[] = [
+                            'url' =>
+                                ($c['publicUrl'] ?:
+                                    'https://' .
+                                        $c['bucket'] .
+                                        '.cos.' .
+                                        $c['region'] .
+                                        '.myqcloud.com') .
+                                '/' .
+                                $row['target'],
+                            'name' => $row['target'],
+                            'provider' => 'cos',
+                        ];
+                    }
+                }
+            }
+            return ['items' => $items];
         }
         if ($method === 'GET' && $path === '/api/media/providers') {
             return ObjectStorage::choices();

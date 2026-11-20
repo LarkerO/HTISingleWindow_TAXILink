@@ -28,7 +28,7 @@ const nav = (path: string) =>
   <div class="app-shell">
     <header class="brandbar">
       <a href="/" @click.prevent="nav('/')" class="brand"
-        ><span class="brand-symbol">↗</span>TAXI<span>Link</span></a
+        ><img src="/logo.png" alt="TAXILink" style="height:36px;max-width:180px;object-fit:contain" /></a
       ><span class="brand-caption">让每一程，更从容</span
       ><span v-if="demo" class="demo-chip">演示环境</span>
     </header>

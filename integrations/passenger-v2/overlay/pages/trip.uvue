@@ -1,0 +1,258 @@
+<script setup lang="ts">
+import PromoCarousel from '../components/PromoCarousel.uvue'
+import AnnouncementNotice from '../components/AnnouncementNotice.uvue'
+import BrandFooter from '../components/BrandFooter.uvue'
+import { themePrimary, themeTint } from '../lib/theme'
+import { computed, ref } from 'vue'
+import MapSheet from '../components/MapSheet.uvue'
+import LoginDrawer from '../components/LoginDrawer.uvue'
+import { api, message, notify, refreshUser, user } from '../lib/api'
+import { isTerminal, stateLabel } from '../lib/models'
+import type { Order, Position } from '../lib/models'
+import { go, orderPage } from '../lib/navigation'
+
+type Snapshot = { type: string; orders?: Order[] }
+const id = ref<string>('')
+const order = ref<Order | null>(null)
+const error = ref<string>('')
+const login = ref<boolean>(false)
+const busy = ref<boolean>(false)
+const cancelOpen = ref<boolean>(false)
+const fareOpen = ref<boolean>(false)
+const loading = ref<boolean>(true)
+let visible: boolean = false
+let fetching: boolean = false
+let timer: number = 0
+let generation: number = 0
+// #ifdef WEB
+let socket: WebSocket | null = null
+// #endif
+
+const terminal = computed((): boolean => order.value != null && isTerminal(order.value.state))
+const tripStage = computed((): string => order.value?.telemetry.stage ?? '')
+const position = computed((): Position | undefined => terminal.value ? undefined : order.value?.telemetry.position)
+const title = computed((): string => {
+  const current = order.value
+  if (current == null) return '行程详情'
+  const stage = current.state == 'ACTIVE' ? (current.telemetry.stageLabel ?? '') : ''
+  return stage.length > 0 ? stage : (stateLabel[current.state] ?? current.state)
+})
+const etaMinutes = computed((): number => {
+  const telemetry = order.value?.telemetry
+  if (telemetry == null) return 0
+  const seconds = tripStage.value == 'TO_PICKUP' ? telemetry.etaPickupSeconds : telemetry.etaDropoffSeconds
+  return seconds == null ? 0 : Math.max(1, Math.ceil(seconds / 60))
+})
+const company = computed((): string => {
+  const current = order.value
+  if (current == null || !current.companyId) return '等待运营企业接单'
+  return current.offers.find((offer): boolean => offer.companyId == current.companyId)?.companyName ?? '承运企业已接单'
+})
+const canPay = computed((): boolean => {
+  const current = order.value
+  return current != null && (current.state == 'AWAITING_PAYMENT' || (terminal.value && current.amountMinor != current.paidMinor))
+})
+const canCancel = computed((): boolean => {
+  const current = order.value
+  return current != null && !terminal.value && tripStage.value != 'WAITING_DROPOFF' &&
+    !['CANCEL_REQUESTED', 'FINALIZING'].includes(current.state)
+})
+
+const assigned = computed(() => order.value?.offers.filter((offer) => offer.companyId == order.value?.companyId) ?? [])
+const vehicleLabel = computed((): string => {
+  const current = order.value
+  if (current == null) return ''
+  const names = [...new Set(assigned.value.map((offer): string => offer.vehicleName))]
+  return (names.length ? names.join(' / ') + ' · ' : '') + current.passengers + ' 人同行'
+})
+const fareCaption = computed((): string => {
+  if (terminal.value) return '本次费用'
+  if (order.value?.billingStarted) return '当前金额'
+  if (assigned.value.length && assigned.value.every((offer): boolean => offer.rules.mode == 'fixed')) return '一口价'
+  return '预估'
+})
+const feeLabels: Record<string, string> = {
+  baseMinor: '起步费', distanceMinor: '里程费', timeMinor: '时长费',
+  pickupMinor: '接客调度费', returnMinor: '回库调度费'
+}
+const canDepart = computed((): boolean => order.value?.state == 'ACTIVE' && tripStage.value == 'WAITING_PICKUP')
+const actionColumns = computed((): number => 1 + Number(canCancel.value) + Number(canDepart.value) + Number(canPay.value))
+
+function accept(next: Order): void {
+  if (visible && next.id == id.value && (order.value == null || next.revision >= order.value.revision)) {
+    order.value = next
+    error.value = ''
+  }
+}
+
+async function load(): Promise<void> {
+  if (!visible || fetching) return
+  if (!id.value) { error.value = '行程编号无效'; loading.value = false; return }
+  const run = generation
+  fetching = true
+  try {
+    if (user.value == null) await refreshUser()
+    if (run != generation) return
+    if (user.value == null) { login.value = true; return }
+    const next = await api<Order>('/orders/' + encodeURIComponent(id.value))
+    if (run == generation) accept(next)
+  } catch (failure) {
+    if (run == generation) {
+      error.value = message(failure)
+      if (user.value == null) {
+        order.value = null
+        login.value = true
+      }
+    }
+  } finally {
+    if (run == generation) { fetching = false; loading.value = false }
+  }
+}
+
+function connect(): void {
+  // #ifdef WEB
+  if (!visible || socket != null || user.value == null || terminal.value) return
+  const protocol = window.location.protocol == 'https:' ? 'wss:' : 'ws:'
+  try {
+    const connection = new WebSocket(protocol + '//' + window.location.host + '/ws')
+    socket = connection
+    connection.onmessage = (event): void => {
+      if (socket != connection || typeof event.data != 'string') return
+      try {
+        const data = JSON.parse(event.data) as Snapshot
+        if (data.type != 'orders.snapshot') return
+        const next = data.orders?.find((item): boolean => item.id == id.value)
+        if (next != null) accept(next)
+      } catch {}
+    }
+    connection.onclose = (): void => {
+      if (socket == connection) { socket = null }
+    }
+  } catch {}
+  // #endif
+}
+
+async function sync(): Promise<void> {
+  await load()
+  if (visible) connect()
+}
+
+function stop(): void {
+  visible = false
+  generation++
+  fetching = false
+  if (timer != 0) { clearInterval(timer); timer = 0 }
+  // #ifdef WEB
+  const connection = socket
+  socket = null
+  connection?.close()
+  // #endif
+}
+
+async function action(which: string): Promise<void> {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await api('/orders/' + encodeURIComponent(id.value) + '/' + which, {})
+    await load()
+  } catch (failure) {
+    notify(failure)
+    if (user.value == null) login.value = true
+  } finally { busy.value = false }
+}
+
+onLoad((options) => { id.value = options?.['id'] ?? '' })
+onShow(() => {
+  visible = true
+  sync()
+  timer = setInterval((): void => {
+    if (user.value != null && !terminal.value) sync()
+  }, 4000)
+})
+onHide(stop)
+onUnload(stop)
+</script>
+
+<template>
+  <MapSheet title="行程详情" back="/pages/orders" :geometry="order?.telemetry.geometry" :position="position" :peek="252" :rider-distance="true">
+    <view class="trip-panel">
+      <AnnouncementNotice placement="orders" />
+      <x-sheet v-if="order" margin="0" padding="11" round="12" border="1" border-color="#e2e6e4"
+        :shadow="[0, 3, 12, 'rgba(57, 65, 62, 0.24)']">
+        <view class="trip-top">
+          <view class="trip-status">
+            <view class="status-label">
+              <x-tag size="small" :color="themeTint" :font-color="themePrimary">{{ stateLabel[order.state] ?? order.state }}</x-tag>
+              <x-text :label="title" font-size="18" class="status-title text-weight-b" />
+            </view>
+            <x-text v-if="etaMinutes > 0 && !terminal" :label="(tripStage == 'TO_PICKUP' ? '预计接客 ' : '预计抵达 ') + etaMinutes + ' 分钟'"
+              font-size="12" color="#526a63" />
+            <x-text v-else-if="order.state == 'QUEUED'" label="正在为你寻找可用车辆" font-size="12" color="#526a63" />
+            <x-text v-else-if="order.state == 'NEEDS_ATTENTION'" label="调度员正在协助" font-size="12" color="#526a63" />
+          </view>
+          <view class="trip-price" @click="fareOpen = true">
+            <x-text :label="fareCaption" font-size="11" color="#526a63" />
+            <x-money :model-value="order.amountMinor / 100" symbol-text=" 游戏币" symbol-position="right"
+              font-size="18" pre-font-size="10" font-family="D-DIN-Bold" :color="themePrimary" />
+            <x-text label="明细 ›" font-size="11" :color="themePrimary" />
+          </view>
+        </view>
+        <view class="trip-company">
+          <view v-for="offer in assigned" :key="offer.id" class="trip-images">
+            <image v-if="offer.companyImageUrl" :src="offer.companyImageUrl" mode="aspectFit" style="width: 36px; height: 36px;" />
+            <image v-if="offer.vehicleImageUrl" :src="offer.vehicleImageUrl" mode="aspectFit" style="width: 92px; height: 48px;" />
+          </view>
+          <x-text :label="company" font-size="19" class="text-weight-b" />
+          <x-text :label="vehicleLabel" font-size="13" color="#526a63" />
+          <x-text :label="order.pickup + ' → ' + order.dropoff" font-size="12" color="#526a63" class="mt-4" />
+        </view>
+        <x-grid :col="actionColumns" item-height="37" :show-border="false">
+          <x-grid-item icon-size="16" font-size="11" :order="0" icon="refresh-line" text="刷新行程" @click="sync" />
+          <x-grid-item icon-size="16" font-size="11" v-if="canDepart" :order="1" icon="play-circle-line" text="确认发车" @click="action('depart')" />
+          <x-grid-item icon-size="16" font-size="11" v-if="canPay" :order="2" icon="wallet-line" text="收银台" @click="go(orderPage('checkout', id))" />
+          <x-grid-item icon-size="16" font-size="11" v-if="canCancel" :order="3" icon="close-circle-line" text="取消订单" @click="cancelOpen = !busy" />
+        </x-grid>
+        <x-text v-if="error" :label="error" font-size="12" color="#a94d1b" />
+        <PromoCarousel placement="trip" />
+      </x-sheet>
+      <view v-else-if="loading">
+        <x-loading label="正在加载行程" class="mb-10" />
+        <x-skeleton v-for="item in 3" :key="item" height="39" class="mb-8" />
+      </view>
+      <view v-else>
+        <x-empty :loading="false" :empty="true" :show-btn="false" :title="error || '登录后查看行程'" img-height="76" />
+        <x-button :block="true" :color="themePrimary" @click="sync">重新加载</x-button>
+      </view>
+    </view>
+    <BrandFooter />
+  </MapSheet>
+  <LoginDrawer v-model:show="login" :resume="orderPage('trip', id)" @success="sync" />
+  <x-drawer v-model:show="fareOpen" title="费用明细" size="auto" :disabled-scroll="true" :show-close="true">
+    <view v-if="order" class="trip-panel">
+      <x-cell :title="fareCaption" :label="(order.amountMinor / 100).toFixed(2) + ' 游戏币'" :padding="['5','0']" :link="false" />
+      <x-cell title="已支付" :label="(order.paidMinor / 100).toFixed(2) + ' 游戏币'" :padding="['5','0']" :link="false" />
+      <template v-if="assigned.length == 1">
+        <x-text label="报价构成" font-size="13" color="#526a63" class="mt-8" />
+        <x-cell v-for="(amount, key) in assigned[0].fare.components" :key="key"
+          :title="feeLabels[key] ?? key" :label="(amount / 100).toFixed(2) + ' 游戏币'" :padding="['5','0']" :link="false" />
+      </template>
+      <x-text :label="order.demonstration ? '演示支付不会扣除游戏内货币。' : '通过统一收银台结算，车费按整游戏币向上取整。'" font-size="12" color="#526a63" class="mt-8" />
+    </view>
+  </x-drawer>
+  <x-modal v-model:show="cancelOpen" title="取消本次行程？" height="auto" confirm-text="确认取消"
+    cancel-text="继续行程" @confirm="action('cancel')">
+    <x-text label="已派车时可能产生取消费用。车辆行驶中或车上有乘客时，需要调度员协助。"
+      color="#526a63" font-size="14" />
+  </x-modal>
+</template>
+
+<style scoped>
+.trip-images { flex-direction: row; align-items: center; }
+.trip-panel { padding: 4px 16px 16px; }
+.trip-top { flex-direction: row; align-items: center; justify-content: space-between; padding-bottom: 9px; }
+.trip-status { flex: 1; padding-right: 8px; }
+.status-label { flex-direction: row; align-items: center; flex-wrap: wrap; }
+.status-title { margin-left: 6px; }
+.trip-price { flex-direction: row; align-items: center; flex-shrink: 0; gap: 4px; }
+.trip-company { border-top-width: 1px; border-bottom-width: 1px; border-color: #e7eeeb; padding: 9px 0; }
+</style>

@@ -1,3 +1,4 @@
+import CarouselPage from './CarouselPage';
 import SystemLogsPage from './SystemLogsPage';
 import CashierSettingsPage from './CashierSettingsPage';
 import AnnouncementsPage from './AnnouncementsPage';
@@ -63,6 +64,7 @@ import './style.css';
 type RecordData = Record<string, any>;
 const menus = [
   { path: '/cashier', name: '收银台商户', icon: <SafetyCertificateOutlined /> },
+  { path: '/carousel', name: '轮播卡片', icon: <SettingOutlined /> },
   { path: '/announcements', name: '公告中心', icon: <UnorderedListOutlined /> },
   { path: '/media', name: '对象存储', icon: <SettingOutlined /> },
   { path: '/passenger-clients', name: '乘客端接入', icon: <SettingOutlined /> },
@@ -203,7 +205,9 @@ function AdminApp() {
         setGroups(g);
         setScope(s.pointIds);
       } else if (
-        ['bluemap', 'announcements', 'media', 'cashier', 'passenger-clients'].includes(r)
+        ['carousel', 'bluemap', 'announcements', 'media', 'cashier', 'passenger-clients'].includes(
+          r,
+        )
       ) {
         setRows([]);
       } else if (r === 'fare') {
@@ -579,7 +583,13 @@ function AdminApp() {
   if (!user)
     return (
       <div className="login-screen">
-        <div className="login-brand">↗ TAXILink</div>
+        <div className="login-brand">
+          <img
+            src="/logo.png"
+            alt="TAXILink"
+            style={{ maxWidth: 240, height: 60, objectFit: 'contain' }}
+          />
+        </div>
         <div className="login-content">
           <span className="eyebrow">THE CITY, CONNECTED.</span>
           <h1>
@@ -611,8 +621,14 @@ function AdminApp() {
     );
   return (
     <ProLayout
-      title="TAXILink"
-      logo={<span className="admin-logo">↗</span>}
+      title={false}
+      logo={
+        <img
+          src="/logo.png"
+          alt="TAXILink"
+          style={{ height: 36, maxWidth: 180, objectFit: 'contain' }}
+        />
+      }
       layout="mix"
       siderWidth={224}
       fixSiderbar
@@ -628,6 +644,7 @@ function AdminApp() {
               '/system_logs',
               '/depot_authorizations',
               '/bluemap',
+              '/carousel',
               '/announcements',
               '/media',
               '/passenger-clients',
@@ -909,6 +926,8 @@ function AdminApp() {
               </Col>
             </Row>
           </>
+        ) : page === '/carousel' ? (
+          <CarouselPage />
         ) : page === '/announcements' ? (
           user.platformAdmin ? (
             <AnnouncementsPage />

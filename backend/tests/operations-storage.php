@@ -205,6 +205,42 @@ try {
         Db::one('SELECT state FROM orders WHERE id=?', [$o['id']])['state'] === 'NEEDS_ATTENTION',
         '不会清除其他原因的人工关注状态',
     );
+    check(\app\domain\Carousel::read() === ['items' => []], '旧数据库默认无轮播，不影响现有页面');
+    $slide = [
+        'title' => '测试轮播',
+        'image' => 'https://images.example.test/card.png',
+        'enabled' => true,
+        'placement' => 'home',
+        'width' => 600,
+        'height' => 180,
+        'type' => 'url',
+        'target' => 'https://example.test/path',
+    ];
+    rejects(fn() => \app\domain\Carousel::save($ordinary, ['items' => [$slide]]), 'FORBIDDEN');
+    \app\domain\Carousel::save($admin, ['items' => [$slide]]);
+    Db::migrate();
+    check(
+        \app\domain\Carousel::read()['items'][0]['image'] === $slide['image'],
+        '重复迁移保留轮播与图片地址',
+    );
+    rejects(
+        fn() => \app\domain\Carousel::save($admin, [
+            'items' => [array_replace($slide, ['target' => 'javascript:alert(1)'])],
+        ]),
+        'VALIDATION',
+    );
+    rejects(
+        fn() => \app\domain\Carousel::save($admin, [
+            'items' => [array_replace($slide, ['width' => 0])],
+        ]),
+        'VALIDATION',
+    );
+    rejects(
+        fn() => \app\domain\Carousel::save($admin, [
+            'items' => [array_replace($slide, ['type' => 'announcement', 'target' => 'missing'])],
+        ]),
+        'VALIDATION',
+    );
 } finally {
     if (is_file($keyFile)) {
         unlink($keyFile);

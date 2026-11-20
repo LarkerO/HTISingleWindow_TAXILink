@@ -415,3 +415,9 @@ test('Console 地图支持拖拽、Ant Design 控制与 3D 失败恢复', { time
     await server.close();
   }
 });
+test('品牌 logo 与两个乘客端主页轮播显示及外链新窗口', {timeout:30000}, async()=>{
+ const roots=['passenger/dist',process.env.CAROUSEL_V2_ROOT].filter(Boolean);
+ for(const root of roots){const server=await serve(root),browser=await launch();const page=await browser.newPage({viewport:{width:390,height:844}});
+ try{await mapFixture(page);await page.route('**/api/carousel',r=>r.fulfill({json:{items:[{title:'测试推广',image:server.base+'/logo.png',enabled:true,placement:'home',width:600,height:180,type:'url',target:'https://example.test/promo'}]}}));await page.route('**/logo.png',async r=>r.fulfill({contentType:'image/png',body:await readFile('logo.png')}));await page.context().route('https://example.test/**',r=>r.fulfill({body:'promotion'}));await page.goto(server.base);await expect(page.locator('.promo-carousel,.promo').first()).toBeVisible();const promo=page.locator('.promo-carousel,.promo').first();await promo.scrollIntoViewIfNeeded();const popup=page.waitForEvent('popup');await promo.locator('button,uni-image,img').first().click();const opened=await popup;await expect(opened).toHaveURL('https://example.test/promo');if(root==='passenger/dist')await expect(page.locator('header img[alt="TAXILink"]')).toBeVisible();await page.screenshot({path:artifacts+(root==='passenger/dist'?'/vue-carousel.png':'/v2-carousel.png'),fullPage:true});}
+ finally{await browser.close();await server.close();}}
+});

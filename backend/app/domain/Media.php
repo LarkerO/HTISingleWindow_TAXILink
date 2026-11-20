@@ -131,6 +131,7 @@ final class Media
             'purpose' => $purpose,
             'provider' => $provider,
             'bytes' => filesize($path),
+            'url' => $plan['publicUrl'],
         ]);
         return ['url' => $plan['publicUrl'], 'key' => $key, 'provider' => $provider];
     }
