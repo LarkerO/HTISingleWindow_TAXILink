@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Button as AButton, Switch as ASwitch } from 'ant-design-vue';
 import { ownBlueMapPosition } from '../../../shared/bluemap-player';
 import { api, user } from '../api';
 import { blueMapEmbed } from '../../../shared/bluemap-embed';
@@ -338,31 +337,34 @@ function follow() {
     <div v-if="home && playerPosition" class="map-player-label" role="status">我的游戏位置</div>
     <div v-if="mapNotice" class="map-recovery-note" role="status">{{ mapNotice }}</div>
     <div class="map-controls">
-      <a-switch
+      <button
         v-if="!view3d"
-        v-model:checked="shading"
-        checked-children="光照"
-        un-checked-children="纯色"
+        type="button"
+        class="map-light"
+        :aria-pressed="shading"
         aria-label="高度光照叠加"
-      />
-      <a-button
+        @click="shading = !shading"
+      >
+        {{ shading ? '光照' : '纯色' }}
+      </button>
+      <button type="button"
         v-if="settings?.allow3d"
         :aria-label="view3d ? '切换到 2D' : '切换到 3D'"
         @click="toggleView"
       >
         {{ view3d ? '2D' : '3D' }}
-      </a-button>
+      </button>
       <template v-if="!view3d">
-        <a-button aria-label="放大地图" @click="zoom(1.4)">＋</a-button
-        ><a-button aria-label="缩小地图" @click="zoom(0.7)">−</a-button
-        ><a-button aria-label="回原点" @click="reset">⌖</a-button
-        ><a-button
+        <button type="button" aria-label="放大地图" @click="zoom(1.4)">＋</button
+        ><button type="button" aria-label="缩小地图" @click="zoom(0.7)">−</button
+        ><button type="button" aria-label="回原点" @click="reset">⌖</button
+        ><button type="button"
           v-if="(home && playerPosition) || (!home && !hideVehicle && position)"
           aria-label="定位车辆"
           @click="follow"
         >
           ◎
-        </a-button>
+        </button>
       </template>
     </div>
   </div>
